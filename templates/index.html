@@ -195,6 +195,31 @@
             background: #047857;
         }
         
+        .btn-add-item {
+            background: #3b82f6;
+            padding: 10px 20px;
+            border-radius: 6px;
+            color: white;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .btn-add-item:hover:not(:disabled) {
+            background: #2563eb;
+        }
+        
+        .new-item-row {
+            background-color: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .new-item-row .editor-table input,
+        .new-item-row .editor-table textarea,
+        .new-item-row .editor-table select {
+            border-color: #3b82f6;
+        }
+        
         .table-container {
             overflow-x: auto;
             max-height: 70vh;
@@ -350,6 +375,9 @@
                     <p id="collection-stats">0 items loaded</p>
                 </div>
                 <div class="editor-actions">
+                    <button class="btn-add-item" id="add-item" disabled>
+                        Add Item
+                    </button>
                     <button class="btn-publish" id="update-publish" disabled>
                         Update & Publish
                     </button>
@@ -390,6 +418,7 @@
                 this.itemsPerPage = 100;
                 this.totalItems = 0;
                 this.modifiedItems = new Set();
+                this.newItemCounter = 0;
                 
                 this.initializeElements();
                 this.bindEvents();
@@ -408,6 +437,7 @@
                     tableBody: document.getElementById('table-body'),
                     collectionName: document.getElementById('collection-name'),
                     collectionStats: document.getElementById('collection-stats'),
+                    addItemButton: document.getElementById('add-item'),
                     updatePublishButton: document.getElementById('update-publish'),
                     pagination: document.getElementById('pagination'),
                     paginationInfo: document.getElementById('pagination-info'),
@@ -421,6 +451,7 @@
                 this.elements.siteSelect.addEventListener('change', () => this.onSiteChange());
                 this.elements.collectionSelect.addEventListener('change', () => this.onCollectionChange());
                 this.elements.loadButton.addEventListener('click', () => this.loadCollection());
+                this.elements.addItemButton.addEventListener('click', () => this.addNewItem());
                 this.elements.updatePublishButton.addEventListener('click', () => this.updateAndPublish());
                 this.elements.prevPageButton.addEventListener('click', () => this.loadPreviousPage());
                 this.elements.nextPageButton.addEventListener('click', () => this.loadNextPage());
@@ -569,6 +600,7 @@
                 this.renderTableBody();
                 this.updateCollectionInfo();
                 this.updatePagination();
+                this.elements.addItemButton.disabled = false;
                 this.elements.updatePublishButton.disabled = false;
             }
             
@@ -852,6 +884,72 @@
                 this.showLoading(false);
             }
             
+            addNewItem() {
+                if (!this.collectionSchema || !this.collectionSchema.fields) {
+                    this.showError('No collection schema available');
+                    return;
+                }
+                
+                // Generate a temporary ID for the new item
+                this.newItemCounter++;
+                const tempId = `new-item-${Date.now()}-${this.newItemCounter}`;
+                
+                console.log('Adding new item with ID:', tempId);
+                
+                // Create new item object with empty field data
+                const newItem = {
+                    id: tempId,
+                    fieldData: {},
+                    isNew: true
+                };
+                
+                // Initialize empty values for all fields
+                this.collectionSchema.fields.forEach(field => {
+                    newItem.fieldData[field.slug] = this.getDefaultValueForField(field);
+                });
+                
+                // Create the table row for the new item
+                const newRow = this.createItemRow(newItem);
+                newRow.classList.add('new-item-row');
+                
+                // Insert at the top of the table
+                if (this.elements.tableBody.firstChild) {
+                    this.elements.tableBody.insertBefore(newRow, this.elements.tableBody.firstChild);
+                } else {
+                    this.elements.tableBody.appendChild(newRow);
+                }
+                
+                // Mark the new item as modified so it gets included in updates
+                this.modifiedItems.add(tempId);
+                
+                // Update the collection info
+                this.updateCollectionInfo();
+                
+                // Show success message
+                this.showSuccess('New item added. Fill in the fields and click "Update & Publish" to save.');
+                
+                // Scroll the new row into view
+                newRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            
+            getDefaultValueForField(field) {
+                switch (field.type) {
+                    case 'Switch':
+                        return false;
+                    case 'Number':
+                        return null;
+                    case 'DateTime':
+                        return null;
+                    case 'ImageRef':
+                    case 'FileRef':
+                        return null;
+                    case 'ItemRefSet':
+                        return [];
+                    default:
+                        return '';
+                }
+            }
+            
             async updateAndPublish() {
                 if (this.modifiedItems.size === 0) {
                     this.showError('No changes to save');
@@ -869,35 +967,84 @@
                 
                 try {
                     // Collect all modified items data
-                    const itemsToUpdate = this.collectModifiedItemsData();
+                    const { itemsToUpdate, newItemsToCreate } = this.collectModifiedItemsData();
                     
                     // Debug logging
                     console.log('Starting update with:', {
                         itemsToUpdate,
+                        newItemsToCreate,
                         modifiedItems: Array.from(this.modifiedItems),
                         collectionId: this.currentCollectionId,
                         siteId: this.currentSiteId
                     });
                     
-                    // Update CMS items
-                    const updateResponse = await fetch(`/api/collections/${this.currentCollectionId}/items`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ items: itemsToUpdate })
-                    });
+                    let totalOperations = 0;
+                    let completedOperations = 0;
                     
-                    const updateResult = await updateResponse.json();
+                    // Count total operations
+                    if (itemsToUpdate.length > 0) totalOperations++;
+                    if (newItemsToCreate.length > 0) totalOperations++;
                     
-                    if (!updateResult.success) {
-                        throw new Error(updateResult.error);
+                    // Create new items first
+                    if (newItemsToCreate.length > 0) {
+                        this.elements.updatePublishButton.textContent = `Step ${completedOperations + 1}/${totalOperations + 1}: Creating ${newItemsToCreate.length} new items...`;
+                        
+                        console.log('Creating new items:', newItemsToCreate);
+                        
+                        const createResponse = await fetch(`/api/collections/${this.currentCollectionId}/items`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ items: newItemsToCreate })
+                        });
+                        
+                        const createResult = await createResponse.json();
+                        
+                        console.log('Create response:', createResult);
+                        
+                        if (!createResult.success) {
+                            throw new Error(`Failed to create new items: ${createResult.error}`);
+                        }
+                        
+                        completedOperations++;
+                        console.log('Successfully created new items:', createResult);
                     }
                     
-                    this.elements.updatePublishButton.textContent = 'Step 2/2: Publishing site...';
+                    // Update existing items
+                    if (itemsToUpdate.length > 0) {
+                        this.elements.updatePublishButton.textContent = `Step ${completedOperations + 1}/${totalOperations + 1}: Updating ${itemsToUpdate.length} existing items...`;
+                        
+                        console.log('Updating existing items:', itemsToUpdate);
+                        
+                        // Debug: Log the exact payload being sent
+                        const updatePayload = { items: itemsToUpdate };
+                        console.log('PATCH payload:', JSON.stringify(updatePayload, null, 2));
+                        
+                        const updateResponse = await fetch(`/api/collections/${this.currentCollectionId}/items`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(updatePayload)
+                        });
+                        
+                        const updateResult = await updateResponse.json();
+                        
+                        console.log('Update response:', updateResult);
+                        
+                        if (!updateResult.success) {
+                            throw new Error(`Failed to update existing items: ${updateResult.error}`);
+                        }
+                        
+                        completedOperations++;
+                        console.log('Successfully updated existing items:', updateResult);
+                    }
+                    
+                    this.elements.updatePublishButton.textContent = `Step ${totalOperations + 1}/${totalOperations + 1}: Publishing site...`;
                     
                     // Publish site
+                    console.log(`Publishing site ${this.currentSiteId}`);
                     const publishResponse = await fetch(`/api/sites/${this.currentSiteId}/publish`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ domains: [] })  // Publish to all domains
                     });
                     
                     const publishResult = await publishResponse.json();
@@ -906,7 +1053,14 @@
                         throw new Error(publishResult.error);
                     }
                     
-                    this.showSuccess('Items updated and site published successfully!');
+                    const totalItems = itemsToUpdate.length + newItemsToCreate.length;
+                    const createdText = newItemsToCreate.length > 0 ? `created ${newItemsToCreate.length}, ` : '';
+                    const updatedText = itemsToUpdate.length > 0 ? `updated ${itemsToUpdate.length}, ` : '';
+                    
+                    this.showSuccess(
+                        `✅ Success! ${createdText}${updatedText}and published the site. ` +
+                        'Your changes are now live on the website.'
+                    );
                     this.modifiedItems.clear();
                     this.clearModifiedStates();
                     
@@ -938,6 +1092,7 @@
             
             collectModifiedItemsData() {
                 const itemsToUpdate = [];
+                const newItemsToCreate = [];
                 
                 this.modifiedItems.forEach(itemId => {
                     const fieldData = {};
@@ -980,25 +1135,82 @@
                         }
                         
                         const fieldValue = this.getFieldValue(input, fieldType);
-                        fieldData[fieldSlug] = fieldValue;
                         
-                        console.log(`Added field: ${fieldSlug} = ${JSON.stringify(fieldValue)}`);
+                        // Only include fields that have meaningful values
+                        // Skip null values for reference fields and empty values for most fields
+                        if (this.shouldIncludeField(fieldSlug, fieldValue, fieldType)) {
+                            fieldData[fieldSlug] = fieldValue;
+                            console.log(`Added field: ${fieldSlug} = ${JSON.stringify(fieldValue)}`);
+                        } else {
+                            console.log(`Skipped field: ${fieldSlug} (value: ${JSON.stringify(fieldValue)}, type: ${fieldType})`);
+                        }
                     });
                     
                     // Only add items that have valid field data
                     if (Object.keys(fieldData).length > 0) {
-                        itemsToUpdate.push({
+                        const itemData = {
                             id: itemId,
                             fieldData: fieldData
-                        });
-                        console.log(`Added item ${itemId} with fields:`, Object.keys(fieldData));
+                        };
+                        
+                        // Check if this is a new item
+                        if (itemId.startsWith('new-item-')) {
+                            newItemsToCreate.push(itemData);
+                            console.log(`Added new item ${itemId} with fields:`, Object.keys(fieldData));
+                        } else {
+                            itemsToUpdate.push(itemData);
+                            console.log(`Added existing item ${itemId} with fields:`, Object.keys(fieldData));
+                        }
                     } else {
                         console.error(`No valid fields found for item ${itemId}`);
                     }
                 });
                 
                 console.log('Final items to update:', itemsToUpdate);
-                return itemsToUpdate;
+                console.log('Final new items to create:', newItemsToCreate);
+                return { itemsToUpdate, newItemsToCreate };
+            }
+            
+            shouldIncludeField(fieldSlug, fieldValue, fieldType) {
+                console.log(`shouldIncludeField check: ${fieldSlug}, value: ${JSON.stringify(fieldValue)}, type: ${fieldType}`);
+                
+                // Always include boolean fields (Switch)
+                if (fieldType === 'Switch') {
+                    console.log(`Including Switch field: ${fieldSlug}`);
+                    return true;
+                }
+                
+                // Skip null values for reference fields
+                if ((fieldType === 'ItemRef' || fieldType === 'ItemRefSet') && (fieldValue === null || fieldValue === '')) {
+                    console.log(`Skipping null/empty reference field: ${fieldSlug}`);
+                    return false;
+                }
+                
+                // Skip empty arrays for multi-reference fields
+                if (fieldType === 'ItemRefSet' && Array.isArray(fieldValue) && fieldValue.length === 0) {
+                    return false;
+                }
+                
+                // Skip null/undefined values for file/image fields
+                if ((fieldType === 'ImageRef' || fieldType === 'FileRef') && !fieldValue) {
+                    return false;
+                }
+                
+                // Skip empty strings for most text fields (but allow them for some fields like descriptions)
+                if (fieldValue === '' && ['PlainText', 'RichText', 'Link', 'Email', 'Phone'].includes(fieldType)) {
+                    // Allow empty strings for these field types
+                    return true;
+                }
+                
+                // Skip null/undefined values for number and date fields
+                if ((fieldType === 'Number' || fieldType === 'DateTime') && (fieldValue === null || fieldValue === undefined)) {
+                    return false;
+                }
+                
+                // Include everything else
+                const shouldInclude = fieldValue !== null && fieldValue !== undefined;
+                console.log(`Final decision for ${fieldSlug}: ${shouldInclude}`);
+                return shouldInclude;
             }
             
             getFieldValue(input, fieldType) {
@@ -1017,8 +1229,14 @@
                         const urlInput = input.querySelector('input') || input;
                         return urlInput.value ? { url: urlInput.value } : null;
                         
+                    case 'ItemRef':
+                        return input.value.trim() || null;
+                        
                     case 'ItemRefSet':
-                        return input.value ? input.value.split(',').map(id => id.trim()).filter(id => id) : [];
+                        if (!input.value || !input.value.trim()) {
+                            return [];
+                        }
+                        return input.value.split(',').map(id => id.trim()).filter(id => id);
                         
                     default:
                         return input.value || null;

@@ -194,13 +194,34 @@ class WebflowAPI:
             
             logger.info(f"Processing chunk {chunk_num}/{total_chunks} with {len(chunk)} items")
             
+            # Clean field data for each item in the chunk
+            cleaned_chunk = []
+            for item in chunk:
+                cleaned_field_data = self.clean_field_data(item['fieldData'])
+                if cleaned_field_data:  # Only include items with valid field data
+                    cleaned_chunk.append({
+                        'id': item['id'],
+                        'fieldData': cleaned_field_data
+                    })
+                else:
+                    logger.warning(f"Skipping item {item['id']} with no valid field data")
+            
+            if not cleaned_chunk:
+                logger.warning(f"Chunk {chunk_num}/{total_chunks} has no valid items after cleaning")
+                results.append({'success': True, 'message': 'No valid items to update in chunk'})
+                continue
+            
             # Log the first item in each chunk for debugging
-            if chunk:
-                first_item = chunk[0]
+            if cleaned_chunk:
+                first_item = cleaned_chunk[0]
                 logger.info(f"Sample item ID: {first_item['id']}")
-                logger.info(f"Sample fieldData keys: {list(first_item['fieldData'].keys())}")
+                logger.info(f"Sample cleaned fieldData keys: {list(first_item['fieldData'].keys())}")
+                logger.info(f"Sample cleaned fieldData values: {json.dumps(first_item['fieldData'], indent=2)}")
+            
+            chunk = cleaned_chunk  # Replace original chunk with cleaned data
             
             data = {'items': chunk}
+            logger.info(f"Sending PATCH request with data: {json.dumps(data, indent=2)[:1000]}...")
             result = self._make_request('PATCH', f'/collections/{collection_id}/items', data)
             
             if result['success']:
@@ -215,6 +236,106 @@ class WebflowAPI:
         # Log summary
         successful_chunks = sum(1 for r in results if r['success'])
         logger.info(f"Bulk update completed: {successful_chunks}/{len(results)} chunks successful")
+        
+        return results
+    
+    def clean_field_data(self, field_data):
+        """Clean and convert field data to proper types for Webflow API"""
+        cleaned_data = {}
+        
+        for key, value in field_data.items():
+            # Handle string "null" values
+            if value == "null" or value == "undefined":
+                logger.info(f"Skipping field {key} with string null/undefined value")
+                continue  # Omit the field entirely
+            
+            # Handle actual None/null values
+            if value is None:
+                logger.info(f"Skipping field {key} with None value")
+                continue  # Omit the field entirely
+            
+            # Handle JSON strings (like image fields)
+            if isinstance(value, str):
+                # Try to parse JSON strings
+                if value.startswith('{') and value.endswith('}'):
+                    try:
+                        parsed_value = json.loads(value)
+                        cleaned_data[key] = parsed_value
+                        logger.info(f"Parsed JSON for field {key}")
+                        continue
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse JSON for field {key}: {value[:100]}...")
+                        # Keep as string if parsing fails
+                
+                # Handle empty strings that should be omitted for reference fields
+                if value.strip() == "" and key in ['tags', 'gallery', 'categories']:
+                    logger.info(f"Skipping empty reference field {key}")
+                    continue
+            
+            # Handle empty arrays
+            if isinstance(value, list) and len(value) == 0:
+                # For reference fields, omit empty arrays
+                if key in ['tags', 'gallery', 'categories']:
+                    logger.info(f"Skipping empty array for reference field {key}")
+                    continue
+            
+            # Keep all other values as-is
+            cleaned_data[key] = value
+            
+        logger.info(f"Cleaned field data: {len(field_data)} -> {len(cleaned_data)} fields")
+        return cleaned_data
+    
+    def create_collection_items(self, collection_id, items_data):
+        """Create new collection items"""
+        logger.info(f"Starting bulk create for collection {collection_id} with {len(items_data)} items")
+        
+        # Validate items data structure
+        for i, item in enumerate(items_data):
+            if 'fieldData' not in item:
+                logger.error(f"New item {i} missing required 'fieldData' field")
+                return [{'success': False, 'error': f'New item {i} missing required fieldData field'}]
+        
+        # Remove temporary IDs from new items and clean field data
+        clean_items = []
+        for item in items_data:
+            cleaned_field_data = self.clean_field_data(item['fieldData'])
+            if cleaned_field_data:  # Only include items with valid field data
+                clean_item = {'fieldData': cleaned_field_data}
+                clean_items.append(clean_item)
+            else:
+                logger.warning(f"Skipping new item with no valid field data")
+        
+        # Split into chunks of 100 items max per request
+        chunk_size = 100
+        results = []
+        total_chunks = (len(clean_items) + chunk_size - 1) // chunk_size
+        
+        for i in range(0, len(clean_items), chunk_size):
+            chunk_num = (i // chunk_size) + 1
+            chunk = clean_items[i:i + chunk_size]
+            
+            logger.info(f"Creating chunk {chunk_num}/{total_chunks} with {len(chunk)} items")
+            
+            # Log the first item in each chunk for debugging
+            if chunk:
+                first_item = chunk[0]
+                logger.info(f"Sample new item fieldData keys: {list(first_item['fieldData'].keys())}")
+            
+            data = {'items': chunk}
+            result = self._make_request('POST', f'/collections/{collection_id}/items', data)
+            
+            if result['success']:
+                logger.info(f"Chunk {chunk_num}/{total_chunks} created successfully")
+            else:
+                logger.error(f"Chunk {chunk_num}/{total_chunks} failed: {result['error']}")
+                if 'details' in result:
+                    logger.error(f"Failure details: {json.dumps(result['details'], indent=2)}")
+            
+            results.append(result)
+            
+        # Log summary
+        successful_chunks = sum(1 for r in results if r['success'])
+        logger.info(f"Bulk create completed: {successful_chunks}/{len(results)} chunks successful")
         
         return results
     
@@ -279,6 +400,60 @@ def get_collection_items(collection_id):
         })
     else:
         return jsonify({'success': False, 'error': result['error']}), 400
+
+@app.route('/api/collections/<collection_id>/items', methods=['POST'])
+def create_collection_items(collection_id):
+    """API endpoint to bulk create new collection items"""
+    logger.info(f"Bulk create request received for collection: {collection_id}")
+    
+    data = request.get_json()
+    items_data = data.get('items', [])
+    
+    if not items_data:
+        error_msg = 'No items provided for creation'
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg}), 400
+    
+    logger.info(f"Processing bulk create for {len(items_data)} new items")
+    
+    # Log sample of items being created (for debugging)
+    if items_data:
+        sample_item = items_data[0]
+        logger.info(f"Sample new item structure - fieldData keys: {list(sample_item.get('fieldData', {}).keys())}")
+    
+    results = webflow_api.create_collection_items(collection_id, items_data)
+    
+    # Analyze results in detail
+    successful_batches = [r for r in results if r['success']]
+    failed_batches = [r for r in results if not r['success']]
+    
+    if failed_batches:
+        # Create detailed error message
+        error_details = []
+        for i, batch_result in enumerate(failed_batches):
+            batch_info = f"Batch {i+1}: {batch_result['error']}"
+            if 'details' in batch_result:
+                batch_info += f" | Details: {json.dumps(batch_result['details'])}"
+            error_details.append(batch_info)
+        
+        detailed_error = {
+            'success': False,
+            'error': f'{len(failed_batches)} out of {len(results)} batches failed during creation',
+            'successful_batches': len(successful_batches),
+            'failed_batches': len(failed_batches),
+            'error_details': error_details,
+            'results': results
+        }
+        
+        logger.error(f"Bulk create partially/completely failed: {json.dumps(detailed_error, indent=2)}")
+        return jsonify(detailed_error), 400
+    
+    logger.info(f"Bulk create completed successfully for all {len(results)} batches")
+    return jsonify({
+        'success': True, 
+        'message': f'Successfully created {len(items_data)} new items in {len(results)} batches',
+        'results': results
+    })
 
 @app.route('/api/collections/<collection_id>/items', methods=['PATCH'])
 def update_collection_items(collection_id):
