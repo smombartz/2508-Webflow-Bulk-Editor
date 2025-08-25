@@ -858,12 +858,11 @@
                     return;
                 }
                 
-                const confirmation = confirm(
-                    `Update ${this.modifiedItems.size} modified items and publish the site?\n\n` +
+// Show confirmation message instead of popup
+                this.showSuccess(
+                    `Starting update for ${this.modifiedItems.size} modified items. ` +
                     'This will make your changes live on the website.'
                 );
-                
-                if (!confirmation) return;
                 
                 this.elements.updatePublishButton.disabled = true;
                 this.elements.updatePublishButton.textContent = 'Step 1/2: Updating items...';
