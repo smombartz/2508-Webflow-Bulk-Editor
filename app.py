@@ -396,6 +396,116 @@ class WebflowAPI:
         
         return result
     
+    def upload_asset(self, file_path, file_name, site_id):
+        """Upload a file to Webflow Assets API using the two-step process"""
+        logger.info(f"Uploading asset {file_name} to site {site_id}")
+        
+        try:
+            import hashlib
+            
+            # Step 1: Calculate MD5 hash of the file
+            with open(file_path, 'rb') as file:
+                file_content = file.read()
+                file_hash = hashlib.md5(file_content).hexdigest()
+                
+            logger.info(f"File hash calculated: {file_hash}")
+            
+            # Step 2: Create asset record in Webflow
+            url = f"{self.base_url}/sites/{site_id}/assets"
+            
+            data = {
+                'fileName': file_name,
+                'fileHash': file_hash
+            }
+            
+            logger.info(f"Creating asset record with data: {data}")
+            
+            self._rate_limit_delay()
+            
+            response = requests.post(url, headers=self.headers, json=data, timeout=60)
+            
+            logger.info(f"Asset creation response status: {response.status_code}")
+            
+            if response.status_code in [200, 201, 202]:  # 202 = Accepted
+                result_data = response.json()
+                logger.info(f"Asset creation successful: {json.dumps(result_data, indent=2)}")
+                
+                # Step 3: Upload file to S3 using upload details
+                upload_details = result_data.get('uploadDetails')
+                upload_url = result_data.get('uploadUrl')
+                
+                if upload_details and upload_url:
+                    logger.info(f"Uploading file to S3: {upload_url}")
+                    
+                    # Prepare S3 upload using AWS form fields
+                    s3_data = {}
+                    s3_files = {}
+                    
+                    # Add all the AWS form fields from uploadDetails
+                    for key, value in upload_details.items():
+                        s3_data[key] = value
+                    
+                    # Add the file last (required by AWS)
+                    s3_files['file'] = (file_name, file_content, upload_details.get('content-type', 'application/octet-stream'))
+                    
+                    logger.info(f"S3 form data keys: {list(s3_data.keys())}")
+                    
+                    self._rate_limit_delay()
+                    
+                    s3_response = requests.post(
+                        upload_url, 
+                        files=s3_files,
+                        data=s3_data,
+                        timeout=60
+                    )
+                    
+                    logger.info(f"S3 upload response status: {s3_response.status_code}")
+                    logger.info(f"S3 upload response headers: {dict(s3_response.headers)}")
+                    
+                    if s3_response.status_code in [200, 201, 204]:
+                        logger.info("File uploaded to S3 successfully")
+                        
+                        # Return the asset information using hostedUrl (CDN URL)
+                        asset_url = result_data.get('hostedUrl') or result_data.get('assetUrl') or result_data.get('url')
+                        return {
+                            'success': True,
+                            'data': result_data,
+                            'url': asset_url,
+                            'asset_id': result_data.get('id'),
+                            'fileName': file_name
+                        }
+                    else:
+                        error_msg = f"S3 upload failed with status {s3_response.status_code}: {s3_response.text[:200]}"
+                        logger.error(error_msg)
+                        return {'success': False, 'error': error_msg}
+                else:
+                    # No upload details means the file might already exist or was processed differently
+                    logger.info("No upload details provided, asset may already exist or be processed")
+                    asset_url = result_data.get('hostedUrl') or result_data.get('assetUrl') or result_data.get('url')
+                    return {
+                        'success': True,
+                        'data': result_data,
+                        'url': asset_url,
+                        'asset_id': result_data.get('id'),
+                        'fileName': file_name
+                    }
+            else:
+                error_msg = f"Asset creation failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg += f": {error_data.get('message', error_data)}"
+                    logger.error(f"Detailed error: {json.dumps(error_data, indent=2)}")
+                except:
+                    error_msg += f": {response.text[:200]}"
+                
+                logger.error(error_msg)
+                return {'success': False, 'error': error_msg}
+                    
+        except Exception as e:
+            error_msg = f"Asset upload exception: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {'success': False, 'error': error_msg}
+    
     def publish_site(self, site_id, custom_domains=None):
         """Publish site to live domains"""
         data = {
@@ -600,6 +710,79 @@ def delete_collection_item(collection_id, item_id):
         return jsonify({
             'success': False,
             'error': f'Server error during delete: {str(e)}'
+        }), 500
+
+@app.route('/api/upload-asset', methods=['POST'])
+def upload_asset():
+    """API endpoint to upload assets to Webflow"""
+    logger.info("Asset upload request received")
+    
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+    
+    try:
+        # Save file temporarily
+        import tempfile
+        import os
+        from werkzeug.utils import secure_filename
+        
+        filename = secure_filename(file.filename)
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, f"webflow_upload_{int(time.time())}_{filename}")
+        
+        logger.info(f"Saving file temporarily to: {temp_path}")
+        file.save(temp_path)
+        
+        # Get site ID from request or use a default (we'll need to pass this from frontend)
+        # For now, we'll need the frontend to provide the site ID
+        # Let's get it from form data or headers
+        site_id = request.form.get('site_id')
+        if not site_id:
+            # Try to get current site from the session or use the one from the frontend
+            # For now, let's return an error asking for site_id
+            os.unlink(temp_path)  # Clean up temp file
+            return jsonify({
+                'success': False, 
+                'error': 'Site ID is required for asset upload'
+            }), 400
+        
+        # Upload to Webflow
+        result = webflow_api.upload_asset(temp_path, filename, site_id)
+        
+        # Clean up temp file
+        try:
+            os.unlink(temp_path)
+        except:
+            pass  # Ignore cleanup errors
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'url': result['url'],
+                'asset_id': result.get('asset_id'),
+                'filename': filename
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Asset upload endpoint error: {str(e)}", exc_info=True)
+        # Clean up temp file if it exists
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+        
+        return jsonify({
+            'success': False,
+            'error': f'Server error during upload: {str(e)}'
         }), 500
 
 @app.route('/api/sites/<site_id>/publish', methods=['POST'])

@@ -220,6 +220,27 @@
             border-color: #3b82f6;
         }
         
+        .pending-upload {
+            border-left: 4px solid #8b5cf6;
+        }
+        
+        .pending-upload .editor-table input,
+        .pending-upload .editor-table textarea,
+        .pending-upload .editor-table select {
+            border-color: #8b5cf6;
+        }
+        
+        .file-uploaded {
+            background-color: #f0fdf4;
+            border-left: 4px solid #10b981;
+        }
+        
+        .file-uploaded .editor-table input,
+        .file-uploaded .editor-table textarea,
+        .file-uploaded .editor-table select {
+            border-color: #10b981;
+        }
+        
         .btn-delete {
             background: #ef4444;
             color: white;
@@ -243,6 +264,73 @@
         .deleting {
             opacity: 0.5;
             pointer-events: none;
+        }
+        
+        .bulk-upload-section {
+            background: #f8fafc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .bulk-upload-controls {
+            display: flex;
+            gap: 15px;
+            align-items: end;
+            flex-wrap: wrap;
+        }
+        
+        .bulk-upload-group {
+            display: flex;
+            gap: 10px;
+            align-items: end;
+        }
+        
+        .btn-bulk-upload {
+            background: #8b5cf6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .btn-bulk-upload:hover:not(:disabled) {
+            background: #7c3aed;
+        }
+        
+        .btn-bulk-upload:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .file-input-hidden {
+            display: none;
+        }
+        
+        .upload-progress {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            display: none;
+        }
+        
+        .upload-progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .upload-progress-fill {
+            height: 100%;
+            background: #f59e0b;
+            transition: width 0.3s ease;
         }
         
         .table-container {
@@ -404,6 +492,29 @@
                 </div>
             </div>
             
+            <div class="bulk-upload-section" id="bulk-upload-section">
+                <div class="bulk-upload-controls">
+                    <div class="form-group">
+                        <label for="field-select">Upload to Field:</label>
+                        <select id="field-select" disabled>
+                            <option value="">Select a field...</option>
+                        </select>
+                    </div>
+                    <div class="bulk-upload-group">
+                        <button class="btn-bulk-upload" id="bulk-upload-btn" disabled>
+                            Bulk Upload
+                        </button>
+                        <input type="file" id="file-input" class="file-input-hidden" multiple accept="image/*,video/*,.pdf,.doc,.docx,.txt">
+                    </div>
+                </div>
+                <div class="upload-progress" id="upload-progress">
+                    <div id="upload-status">Uploading files...</div>
+                    <div class="upload-progress-bar">
+                        <div class="upload-progress-fill" id="upload-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="table-container">
                 <table class="editor-table" id="items-table">
                     <thead id="table-head">
@@ -439,6 +550,7 @@
                 this.totalItems = 0;
                 this.modifiedItems = new Set();
                 this.newItemCounter = 0;
+                this.pendingFiles = new Map(); // Store files for later upload
                 
                 this.initializeElements();
                 this.bindEvents();
@@ -462,7 +574,13 @@
                     paginationInfo: document.getElementById('pagination-info'),
                     prevPageButton: document.getElementById('prev-page'),
                     nextPageButton: document.getElementById('next-page'),
-                    connectionStatus: document.getElementById('connection-status')
+                    connectionStatus: document.getElementById('connection-status'),
+                    fieldSelect: document.getElementById('field-select'),
+                    bulkUploadButton: document.getElementById('bulk-upload-btn'),
+                    fileInput: document.getElementById('file-input'),
+                    uploadProgress: document.getElementById('upload-progress'),
+                    uploadStatus: document.getElementById('upload-status'),
+                    uploadProgressFill: document.getElementById('upload-progress-fill')
                 };
             }
             
@@ -473,6 +591,8 @@
                 this.elements.updatePublishButton.addEventListener('click', () => this.updateAndPublish());
                 this.elements.prevPageButton.addEventListener('click', () => this.loadPreviousPage());
                 this.elements.nextPageButton.addEventListener('click', () => this.loadNextPage());
+                this.elements.bulkUploadButton.addEventListener('click', () => this.triggerBulkUpload());
+                this.elements.fileInput.addEventListener('change', (e) => this.handleFileSelection(e));
             }
             
             async checkAPIConnection() {
@@ -625,6 +745,7 @@
                 this.renderTableBody();
                 this.updateCollectionInfo();
                 this.updatePagination();
+                this.populateFieldSelect();
                 this.elements.addItemButton.disabled = false;
                 this.elements.updatePublishButton.disabled = false;
             }
@@ -810,21 +931,40 @@
                 
                 const input = document.createElement('input');
                 input.type = 'text';
-                input.placeholder = `${field.type === 'ImageRef' ? 'Image' : 'File'} URL`;
+                input.placeholder = `${field.type === 'ImageRef' || field.type === 'Image' ? 'Image' : 'File'} URL`;
                 input.id = `${itemId}-${field.slug}`;
                 input.setAttribute('data-field-slug', field.slug);
                 input.setAttribute('data-field-type', field.type);
                 input.setAttribute('data-item-id', itemId);
                 
                 if (value && typeof value === 'object' && value.url) {
-                    input.value = value.url;
-                    
-                    if (field.type === 'ImageRef' && value.url) {
-                        const preview = document.createElement('img');
-                        preview.src = value.url;
-                        preview.className = 'image-preview';
-                        preview.onerror = () => preview.style.display = 'none';
-                        container.appendChild(preview);
+                    if (value.isLocal) {
+                        // Handle local file preview
+                        input.value = value.fileName || 'Local file selected';
+                        input.style.backgroundColor = '#f3f4f6';
+                        input.readOnly = true;
+                        input.title = `Local file: ${value.fileName}. Will be uploaded when you publish.`;
+                        
+                        if ((field.type === 'ImageRef' || field.type === 'Image') && value.url) {
+                            const preview = document.createElement('img');
+                            preview.src = value.url;
+                            preview.className = 'image-preview';
+                            preview.style.border = '2px solid #8b5cf6';
+                            preview.title = 'Local file preview - will be uploaded on publish';
+                            preview.onerror = () => preview.style.display = 'none';
+                            container.appendChild(preview);
+                        }
+                    } else {
+                        // Handle regular URL
+                        input.value = value.url;
+                        
+                        if ((field.type === 'ImageRef' || field.type === 'Image') && value.url) {
+                            const preview = document.createElement('img');
+                            preview.src = value.url;
+                            preview.className = 'image-preview';
+                            preview.onerror = () => preview.style.display = 'none';
+                            container.appendChild(preview);
+                        }
                     }
                 } else if (typeof value === 'string') {
                     input.value = value;
@@ -837,8 +977,6 @@
                     if (selector === 'input') return input;
                     return HTMLElement.prototype.querySelector.call(this, selector);
                 };
-                
-                // Note: Event listeners will be added by the parent function
                 
                 return container;
             }
@@ -1000,17 +1138,31 @@
                     return;
                 }
                 
-// Show confirmation message instead of popup
-                this.showSuccess(
-                    `Starting update for ${this.modifiedItems.size} modified items. ` +
-                    'This will make your changes live on the website.'
-                );
+                // Show confirmation message instead of popup
+                const pendingFilesCount = this.pendingFiles.size;
+                const statusMessage = pendingFilesCount > 0 
+                    ? `Starting update for ${this.modifiedItems.size} modified items (including ${pendingFilesCount} file uploads). This will make your changes live on the website.`
+                    : `Starting update for ${this.modifiedItems.size} modified items. This will make your changes live on the website.`;
+                    
+                this.showSuccess(statusMessage);
                 
                 this.elements.updatePublishButton.disabled = true;
-                this.elements.updatePublishButton.textContent = 'Step 1/2: Updating items...';
                 
                 try {
-                    // Collect all modified items data
+                    let totalOperations = 0;
+                    let completedOperations = 0;
+                    
+                    // Count total operations
+                    if (pendingFilesCount > 0) totalOperations++; // File upload step
+                    
+                    // Step 1: Upload pending files first
+                    if (pendingFilesCount > 0) {
+                        this.elements.updatePublishButton.textContent = `Step ${completedOperations + 1}: Uploading ${pendingFilesCount} files...`;
+                        await this.uploadPendingFiles();
+                        completedOperations++;
+                    }
+                    
+                    // Now collect modified items data after files are uploaded
                     const { itemsToUpdate, newItemsToCreate } = this.collectModifiedItemsData();
                     
                     // Debug logging
@@ -1022,10 +1174,7 @@
                         siteId: this.currentSiteId
                     });
                     
-                    let totalOperations = 0;
-                    let completedOperations = 0;
-                    
-                    // Count total operations
+                    // Count remaining operations
                     if (itemsToUpdate.length > 0) totalOperations++;
                     if (newItemsToCreate.length > 0) totalOperations++;
                     
@@ -1215,10 +1364,260 @@
                 return { itemsToUpdate, newItemsToCreate };
             }
             
+            populateFieldSelect() {
+                console.log('populateFieldSelect called');
+                console.log('Collection schema:', this.collectionSchema);
+                
+                if (!this.collectionSchema || !this.collectionSchema.fields) {
+                    console.error('No collection schema or fields available');
+                    return;
+                }
+                
+                this.elements.fieldSelect.innerHTML = '<option value="">Select a field...</option>';
+                
+                console.log('All fields:', this.collectionSchema.fields.map(f => ({ slug: f.slug, type: f.type, displayName: f.displayName })));
+                
+                // Include file/image fields AND also allow other field types for testing
+                const fileFields = this.collectionSchema.fields.filter(field => 
+                    field.type === 'ImageRef' || field.type === 'FileRef' || field.type === 'Image' || field.type === 'File'
+                );
+                
+                console.log('Filtered file fields:', fileFields);
+                
+                if (fileFields.length === 0) {
+                    console.log('No file/image fields found, showing all fields for debugging');
+                    // If no file fields, show all fields for debugging
+                    this.collectionSchema.fields.forEach(field => {
+                        const option = document.createElement('option');
+                        option.value = field.slug;
+                        option.textContent = `${field.displayName} (${field.type})`;
+                        option.setAttribute('data-field-type', field.type);
+                        this.elements.fieldSelect.appendChild(option);
+                    });
+                } else {
+                    fileFields.forEach(field => {
+                        const option = document.createElement('option');
+                        option.value = field.slug;
+                        option.textContent = field.displayName;
+                        option.setAttribute('data-field-type', field.type);
+                        this.elements.fieldSelect.appendChild(option);
+                    });
+                }
+                
+                this.elements.fieldSelect.disabled = false;
+                console.log('Field dropdown populated with', this.elements.fieldSelect.options.length - 1, 'options');
+                
+                // Remove any existing event listeners and add a new one
+                this.elements.fieldSelect.removeEventListener('change', this.fieldSelectChangeHandler);
+                this.fieldSelectChangeHandler = () => {
+                    this.elements.bulkUploadButton.disabled = !this.elements.fieldSelect.value;
+                    console.log('Field selected:', this.elements.fieldSelect.value);
+                };
+                this.elements.fieldSelect.addEventListener('change', this.fieldSelectChangeHandler);
+            }
+            
+            triggerBulkUpload() {
+                if (!this.elements.fieldSelect.value) {
+                    this.showError('Please select a field to upload to.');
+                    return;
+                }
+                
+                this.elements.fileInput.click();
+            }
+            
+            async handleFileSelection(event) {
+                const files = Array.from(event.target.files);
+                if (files.length === 0) return;
+                
+                const selectedField = this.elements.fieldSelect.value;
+                const selectedFieldType = this.elements.fieldSelect.options[this.elements.fieldSelect.selectedIndex].getAttribute('data-field-type');
+                
+                console.log(`Adding ${files.length} files to field: ${selectedField}`);
+                
+                this.showUploadProgress(true);
+                
+                try {
+                    let processedCount = 0;
+                    
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const progress = ((i + 1) / files.length) * 100;
+                        
+                        this.updateUploadProgress(progress, `Adding ${file.name} (${i + 1}/${files.length})`);
+                        
+                        // Create local file reference and new row
+                        this.createItemWithLocalFile(selectedField, selectedFieldType, file);
+                        processedCount++;
+                    }
+                    
+                    this.showUploadProgress(false);
+                    this.showSuccess(`Added ${processedCount} files. Edit details and click "Update & Publish" to save.`);
+                    
+                } catch (error) {
+                    this.showUploadProgress(false);
+                    this.showError(`Failed to add files: ${error.message}`);
+                } finally {
+                    this.elements.fileInput.value = ''; // Reset file input
+                    this.updateCollectionInfo();
+                }
+            }
+            
+            createItemWithLocalFile(fieldSlug, fieldType, file) {
+                // Generate a temporary ID for the new item
+                this.newItemCounter++;
+                const tempId = `new-item-${Date.now()}-${this.newItemCounter}`;
+                
+                console.log(`Creating new item with local file: ${file.name}`);
+                
+                // Store the file for later upload
+                this.pendingFiles.set(tempId, {
+                    file: file,
+                    fieldSlug: fieldSlug,
+                    fieldType: fieldType
+                });
+                
+                // Create new item object
+                const newItem = {
+                    id: tempId,
+                    fieldData: {},
+                    isNew: true
+                };
+                
+                // Initialize default values for all fields
+                this.collectionSchema.fields.forEach(field => {
+                    if (field.slug === fieldSlug) {
+                        // Show local file preview for the selected field
+                        if (fieldType === 'ImageRef' || fieldType === 'FileRef' || fieldType === 'Image' || fieldType === 'File') {
+                            // Create a local preview URL
+                            const previewUrl = URL.createObjectURL(file);
+                            newItem.fieldData[field.slug] = { url: previewUrl, isLocal: true, fileName: file.name };
+                        }
+                    } else {
+                        newItem.fieldData[field.slug] = this.getDefaultValueForField(field);
+                    }
+                });
+                
+                // Use filename as default name if there's a name field
+                const nameField = this.collectionSchema.fields.find(f => f.slug === 'name' || f.slug === 'title');
+                if (nameField) {
+                    const baseName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+                    newItem.fieldData[nameField.slug] = baseName;
+                }
+                
+                // Create the table row
+                const newRow = this.createItemRow(newItem);
+                newRow.classList.add('new-item-row');
+                
+                // Add a visual indicator that this item has a pending file
+                newRow.classList.add('pending-upload');
+                
+                // Insert at the top of the table
+                if (this.elements.tableBody.firstChild) {
+                    this.elements.tableBody.insertBefore(newRow, this.elements.tableBody.firstChild);
+                } else {
+                    this.elements.tableBody.appendChild(newRow);
+                }
+                
+                // Mark as modified
+                this.modifiedItems.add(tempId);
+            }
+            
+            async uploadPendingFiles() {
+                if (this.pendingFiles.size === 0) {
+                    return;
+                }
+                
+                console.log(`Uploading ${this.pendingFiles.size} pending files`);
+                
+                let uploadCount = 0;
+                const totalFiles = this.pendingFiles.size;
+                
+                // Create a copy of the entries to avoid modification during iteration
+                const filesToUpload = Array.from(this.pendingFiles.entries());
+                
+                for (const [tempId, fileData] of filesToUpload) {
+                    uploadCount++;
+                    const { file, fieldSlug, fieldType } = fileData;
+                    
+                    this.elements.updatePublishButton.textContent = `Uploading ${file.name} (${uploadCount}/${totalFiles})...`;
+                    
+                    try {
+                        console.log(`Uploading file: ${file.name} for item ${tempId}, field ${fieldSlug}`);
+                        
+                        // Create form data for file upload
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('site_id', this.currentSiteId);
+                        
+                        const uploadResponse = await fetch('/api/upload-asset', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        const uploadResult = await uploadResponse.json();
+                        
+                        if (!uploadResult.success) {
+                            throw new Error(`File upload failed: ${uploadResult.error}`);
+                        }
+                        
+                        console.log(`File uploaded successfully: ${uploadResult.url}`);
+                        
+                        // Update the corresponding input field with the Webflow asset URL
+                        const fileInput = document.querySelector(`[data-item-id="${tempId}"][data-field-slug="${fieldSlug}"]`);
+                        if (fileInput) {
+                            // For ImageRef/FileRef fields, find the URL input within
+                            const urlInput = fileInput.querySelector('input') || fileInput;
+                            if (urlInput) {
+                                urlInput.value = uploadResult.url;
+                                urlInput.classList.add('modified');
+                                
+                                // Update any preview images
+                                const preview = fileInput.querySelector('img');
+                                if (preview && fieldType === 'ImageRef') {
+                                    preview.src = uploadResult.url;
+                                }
+                            }
+                        }
+                        
+                        // Remove from pending files
+                        this.pendingFiles.delete(tempId);
+                        
+                        // Remove the pending-upload class from the row
+                        const row = document.querySelector(`tr[data-item-id="${tempId}"]`);
+                        if (row) {
+                            row.classList.remove('pending-upload');
+                            row.classList.add('file-uploaded');
+                        }
+                        
+                    } catch (error) {
+                        console.error(`Failed to upload file ${file.name}:`, error);
+                        throw new Error(`Failed to upload ${file.name}: ${error.message}`);
+                    }
+                }
+                
+                console.log(`Successfully uploaded all ${totalFiles} files`);
+            }
+            
+            showUploadProgress(show) {
+                this.elements.uploadProgress.style.display = show ? 'block' : 'none';
+            }
+            
+            updateUploadProgress(percentage, statusText) {
+                this.elements.uploadProgressFill.style.width = `${percentage}%`;
+                this.elements.uploadStatus.textContent = statusText;
+            }
+            
             async deleteItem(itemId, rowElement) {
                 // Check if this is a new item (not yet saved to Webflow)
                 if (itemId.startsWith('new-item-')) {
-                    // Just remove from DOM and modified items set
+                    // Clean up pending file if exists
+                    if (this.pendingFiles.has(itemId)) {
+                        const fileData = this.pendingFiles.get(itemId);
+                        console.log(`Cleaning up pending file for deleted item: ${fileData.file.name}`);
+                        this.pendingFiles.delete(itemId);
+                    }
+                    
+                    // Remove from DOM and modified items set
                     this.modifiedItems.delete(itemId);
                     rowElement.remove();
                     this.updateCollectionInfo();
@@ -1328,6 +1727,11 @@
                     case 'ImageRef':
                     case 'FileRef':
                         const urlInput = input.querySelector('input') || input;
+                        // Skip local blob URLs - they should have been replaced by the upload process
+                        if (urlInput.value && urlInput.value.startsWith('blob:')) {
+                            console.warn(`Local blob URL detected for field, should have been uploaded: ${urlInput.value}`);
+                            return null;
+                        }
                         return urlInput.value ? { url: urlInput.value } : null;
                         
                     case 'ItemRef':
