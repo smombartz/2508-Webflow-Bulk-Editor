@@ -220,6 +220,31 @@
             border-color: #3b82f6;
         }
         
+        .btn-delete {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .btn-delete:hover {
+            background: #dc2626;
+        }
+        
+        .delete-column {
+            width: 80px;
+            text-align: center;
+        }
+        
+        .deleting {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
         .table-container {
             overflow-x: auto;
             max-height: 70vh;
@@ -353,11 +378,6 @@
                         <option value="">Select a site first</option>
                     </select>
                 </div>
-                
-                <div class="form-group">
-                    <label>&nbsp;</label>
-                    <button id="load-collection" disabled>Load Collection</button>
-                </div>
             </div>
         </div>
         
@@ -429,7 +449,6 @@
                 this.elements = {
                     siteSelect: document.getElementById('site-select'),
                     collectionSelect: document.getElementById('collection-select'),
-                    loadButton: document.getElementById('load-collection'),
                     editor: document.getElementById('editor'),
                     loading: document.getElementById('loading'),
                     messages: document.getElementById('messages'),
@@ -450,7 +469,6 @@
             bindEvents() {
                 this.elements.siteSelect.addEventListener('change', () => this.onSiteChange());
                 this.elements.collectionSelect.addEventListener('change', () => this.onCollectionChange());
-                this.elements.loadButton.addEventListener('click', () => this.loadCollection());
                 this.elements.addItemButton.addEventListener('click', () => this.addNewItem());
                 this.elements.updatePublishButton.addEventListener('click', () => this.updateAndPublish());
                 this.elements.prevPageButton.addEventListener('click', () => this.loadPreviousPage());
@@ -552,13 +570,20 @@
             resetCollectionSelect() {
                 this.elements.collectionSelect.innerHTML = '<option value="">Select a site first</option>';
                 this.elements.collectionSelect.disabled = true;
-                this.elements.loadButton.disabled = true;
+                this.elements.editor.style.display = 'none';
             }
             
-            onCollectionChange() {
+            async onCollectionChange() {
                 const collectionId = this.elements.collectionSelect.value;
                 this.currentCollectionId = collectionId;
-                this.elements.loadButton.disabled = !collectionId;
+                
+                if (collectionId) {
+                    // Auto-load the collection when selected
+                    await this.loadCollection();
+                } else {
+                    // Hide editor if no collection selected
+                    this.elements.editor.style.display = 'none';
+                }
             }
             
             async loadCollection() {
@@ -615,6 +640,12 @@
                     headerRow.appendChild(th);
                 });
                 
+                // Add delete column header
+                const deleteHeader = document.createElement('th');
+                deleteHeader.textContent = 'Actions';
+                deleteHeader.className = 'delete-column';
+                headerRow.appendChild(deleteHeader);
+                
                 this.elements.tableHead.innerHTML = '';
                 this.elements.tableHead.appendChild(headerRow);
             }
@@ -638,6 +669,19 @@
                     td.appendChild(input);
                     row.appendChild(td);
                 });
+                
+                // Add delete button cell
+                const deleteCell = document.createElement('td');
+                deleteCell.className = 'delete-column';
+                
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'btn-delete';
+                deleteButton.textContent = 'Delete';
+                deleteButton.setAttribute('data-item-id', item.id);
+                deleteButton.addEventListener('click', () => this.deleteItem(item.id, row));
+                
+                deleteCell.appendChild(deleteButton);
+                row.appendChild(deleteCell);
                 
                 return row;
             }
@@ -1169,6 +1213,63 @@
                 console.log('Final items to update:', itemsToUpdate);
                 console.log('Final new items to create:', newItemsToCreate);
                 return { itemsToUpdate, newItemsToCreate };
+            }
+            
+            async deleteItem(itemId, rowElement) {
+                // Check if this is a new item (not yet saved to Webflow)
+                if (itemId.startsWith('new-item-')) {
+                    // Just remove from DOM and modified items set
+                    this.modifiedItems.delete(itemId);
+                    rowElement.remove();
+                    this.updateCollectionInfo();
+                    this.showSuccess('New item removed.');
+                    return;
+                }
+                
+                // Confirm deletion for existing items
+                const confirmation = confirm('Are you sure you want to delete this item? This action cannot be undone.');
+                if (!confirmation) return;
+                
+                // Add visual feedback
+                rowElement.classList.add('deleting');
+                const deleteButton = rowElement.querySelector('.btn-delete');
+                deleteButton.textContent = 'Deleting...';
+                deleteButton.disabled = true;
+                
+                try {
+                    console.log(`Deleting item ${itemId}`);
+                    
+                    const response = await fetch(`/api/collections/${this.currentCollectionId}/items/${itemId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ isArchived: true })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (!result.success) {
+                        throw new Error(result.error || 'Failed to delete item');
+                    }
+                    
+                    // Remove from DOM and modified items set
+                    this.modifiedItems.delete(itemId);
+                    rowElement.remove();
+                    this.updateCollectionInfo();
+                    
+                    this.showSuccess('Item deleted successfully.');
+                    
+                    console.log('Successfully deleted item:', itemId);
+                    
+                } catch (error) {
+                    console.error('Delete operation failed:', error);
+                    
+                    // Remove visual feedback on error
+                    rowElement.classList.remove('deleting');
+                    deleteButton.textContent = 'Delete';
+                    deleteButton.disabled = false;
+                    
+                    this.showError(`Failed to delete item: ${error.message}`);
+                }
             }
             
             shouldIncludeField(fieldSlug, fieldValue, fieldType) {

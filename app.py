@@ -166,9 +166,51 @@ class WebflowAPI:
         return self._make_request('GET', f'/collections/{collection_id}')
     
     def get_collection_items(self, collection_id, limit=100, offset=0):
-        """Fetch collection items with pagination"""
-        params = {'limit': limit, 'offset': offset}
-        return self._make_request('GET', f'/collections/{collection_id}/items', params=params)
+        """Fetch collection items with pagination, filtering out archived items"""
+        # Try to exclude archived items using query parameter (if supported by Webflow API)
+        params = {
+            'limit': limit, 
+            'offset': offset,
+            # 'isArchived': 'false'  # This might work but let's test first
+        }
+        
+        result = self._make_request('GET', f'/collections/{collection_id}/items', params=params)
+        
+        if result['success'] and 'data' in result:
+            items = result['data'].get('items', [])
+            
+            # Log a sample item to see the structure
+            if items:
+                sample_item = items[0]
+                logger.info(f"Sample item keys: {list(sample_item.keys())}")
+                if 'isArchived' in sample_item:
+                    logger.info(f"Sample item isArchived value: {sample_item['isArchived']}")
+            
+            # Filter out archived items on our end
+            original_count = len(items)
+            filtered_items = []
+            
+            for item in items:
+                is_archived = item.get('isArchived', False)
+                if not is_archived:
+                    filtered_items.append(item)
+                else:
+                    logger.info(f"Filtering out archived item: {item.get('id', 'unknown')}")
+            
+            filtered_count = len(filtered_items)
+            
+            if original_count != filtered_count:
+                logger.info(f"Filtered out {original_count - filtered_count} archived items from {original_count} total")
+            
+            # Update the result data
+            result['data']['items'] = filtered_items
+            
+            # Update pagination info
+            if 'pagination' in result['data']:
+                pagination = result['data']['pagination']
+                pagination['returned'] = filtered_count  # Actual items returned after filtering
+        
+        return result
     
     def update_collection_items(self, collection_id, items_data):
         """Bulk update collection items"""
@@ -339,6 +381,21 @@ class WebflowAPI:
         
         return results
     
+    def delete_collection_item(self, collection_id, item_id):
+        """Archive (delete) a single collection item using PATCH with isArchived"""
+        logger.info(f"Archiving item {item_id} from collection {collection_id}")
+        
+        # Use PATCH with isArchived: true to delete the item
+        data = {'isArchived': True}
+        result = self._make_request('PATCH', f'/collections/{collection_id}/items/{item_id}', data)
+        
+        if result['success']:
+            logger.info(f"Item {item_id} archived successfully")
+        else:
+            logger.error(f"Failed to archive item {item_id}: {result['error']}")
+        
+        return result
+    
     def publish_site(self, site_id, custom_domains=None):
         """Publish site to live domains"""
         data = {
@@ -508,6 +565,42 @@ def update_collection_items(collection_id):
         'message': f'Successfully updated {len(items_data)} items in {len(results)} batches',
         'results': results
     })
+
+@app.route('/api/collections/<collection_id>/items/<item_id>', methods=['PATCH'])
+def delete_collection_item(collection_id, item_id):
+    """API endpoint to archive (delete) a single collection item"""
+    logger.info(f"Archive request received for item {item_id} in collection {collection_id}")
+    
+    # Check if this is a delete request by looking for isArchived in the body
+    data = request.get_json() or {}
+    if not data.get('isArchived'):
+        return jsonify({
+            'success': False,
+            'error': 'This endpoint is only for archiving items. Set isArchived: true in the request body.'
+        }), 400
+    
+    try:
+        result = webflow_api.delete_collection_item(collection_id, item_id)
+        
+        if result['success']:
+            logger.info(f"Item {item_id} deleted successfully")
+            return jsonify({
+                'success': True,
+                'message': f'Item {item_id} deleted successfully'
+            })
+        else:
+            logger.error(f"Failed to delete item {item_id}: {result['error']}")
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Delete endpoint error for item {item_id}: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': f'Server error during delete: {str(e)}'
+        }), 500
 
 @app.route('/api/sites/<site_id>/publish', methods=['POST'])
 def publish_site(site_id):
