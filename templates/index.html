@@ -708,10 +708,14 @@
                 const siteId = this.elements.siteSelect.value;
                 
                 if (!siteId) {
+                    this.removeFromLocalStorage('lastSiteId');
+                    this.removeFromLocalStorage('lastCollectionId');
                     this.resetCollectionSelect();
                     return;
                 }
                 
+                // Save site selection to localStorage
+                this.saveToLocalStorage('lastSiteId', siteId);
                 this.currentSiteId = siteId;
                 await this.loadCollections(siteId);
             }
@@ -760,12 +764,18 @@
                 this.currentCollectionId = collectionId;
                 
                 if (collectionId) {
+                    // Save collection selection to localStorage
+                    this.saveToLocalStorage('lastCollectionId', collectionId);
+                    
                     // Enable refresh button when a collection is selected
                     this.elements.refreshCollectionButton.disabled = false;
                     
                     // Auto-load the collection when selected
                     await this.loadCollection();
                 } else {
+                    // Remove collection from localStorage if none selected
+                    this.removeFromLocalStorage('lastCollectionId');
+                    
                     // Hide editor and disable refresh button if no collection selected
                     this.elements.editor.style.display = 'none';
                     this.elements.refreshCollectionButton.disabled = true;
@@ -1875,6 +1885,78 @@
             
             hideMessages() {
                 this.elements.messages.innerHTML = '';
+            }
+            
+            // localStorage utility methods
+            saveToLocalStorage(key, value) {
+                try {
+                    localStorage.setItem(`webflow-bulk-editor-${key}`, value);
+                } catch (error) {
+                    console.warn('Failed to save to localStorage:', error);
+                }
+            }
+            
+            getFromLocalStorage(key) {
+                try {
+                    return localStorage.getItem(`webflow-bulk-editor-${key}`);
+                } catch (error) {
+                    console.warn('Failed to read from localStorage:', error);
+                    return null;
+                }
+            }
+            
+            removeFromLocalStorage(key) {
+                try {
+                    localStorage.removeItem(`webflow-bulk-editor-${key}`);
+                } catch (error) {
+                    console.warn('Failed to remove from localStorage:', error);
+                }
+            }
+            
+            async restorePreviousSelections() {
+                const lastSiteId = this.getFromLocalStorage('lastSiteId');
+                const lastCollectionId = this.getFromLocalStorage('lastCollectionId');
+                
+                console.log('Restoring previous selections:', { lastSiteId, lastCollectionId });
+                
+                if (lastSiteId) {
+                    // Check if the site still exists in the dropdown
+                    const siteOption = this.elements.siteSelect.querySelector(`option[value="${lastSiteId}"]`);
+                    if (siteOption) {
+                        console.log('Restoring site selection:', lastSiteId);
+                        this.elements.siteSelect.value = lastSiteId;
+                        this.currentSiteId = lastSiteId;
+                        
+                        // Load collections for the restored site
+                        await this.loadCollections(lastSiteId);
+                        
+                        // After collections are loaded, restore collection selection
+                        if (lastCollectionId) {
+                            // Wait a moment for collections to load
+                            setTimeout(() => {
+                                const collectionOption = this.elements.collectionSelect.querySelector(`option[value="${lastCollectionId}"]`);
+                                if (collectionOption) {
+                                    console.log('Restoring collection selection:', lastCollectionId);
+                                    this.elements.collectionSelect.value = lastCollectionId;
+                                    this.currentCollectionId = lastCollectionId;
+                                    
+                                    // Enable refresh button
+                                    this.elements.refreshCollectionButton.disabled = false;
+                                    
+                                    // Load the collection
+                                    this.loadCollection();
+                                } else {
+                                    console.log('Collection not found, removing from localStorage:', lastCollectionId);
+                                    this.removeFromLocalStorage('lastCollectionId');
+                                }
+                            }, 100);
+                        }
+                    } else {
+                        console.log('Site not found, removing from localStorage:', lastSiteId);
+                        this.removeFromLocalStorage('lastSiteId');
+                        this.removeFromLocalStorage('lastCollectionId');
+                    }
+                }
             }
         }
         
