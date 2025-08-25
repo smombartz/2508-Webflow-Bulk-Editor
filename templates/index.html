@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webflow CMS Bulk Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8fafc;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #1e293b;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #64748b;
+            font-size: 1.1rem;
+        }
+        
+        .controls {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 20px;
+            align-items: end;
+            flex-wrap: wrap;
+        }
+        
+        .form-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+        
+        select, button {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        
+        select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        select:disabled {
+            background: #f3f4f6;
+            color: #9ca3af;
+        }
+        
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            min-width: 150px;
+        }
+        
+        button:hover:not(:disabled) {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+        
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #e5e7eb;
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #fecaca;
+        }
+        
+        .success {
+            background: #f0fdf4;
+            color: #16a34a;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #bbf7d0;
+        }
+        
+        .editor-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: none;
+        }
+        
+        .editor-header {
+            background: #f8fafc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .collection-info h3 {
+            color: #1e293b;
+            margin-bottom: 5px;
+        }
+        
+        .collection-info p {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        
+        .editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-publish {
+            background: #059669;
+            padding: 10px 20px;
+            border-radius: 6px;
+            color: white;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .btn-publish:hover:not(:disabled) {
+            background: #047857;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            max-height: 70vh;
+        }
+        
+        .editor-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .editor-table th {
+            background: #f8fafc;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .editor-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: top;
+        }
+        
+        .editor-table tr:hover {
+            background: #fafbfc;
+        }
+        
+        .editor-table input,
+        .editor-table textarea,
+        .editor-table select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 150px;
+        }
+        
+        .editor-table input:focus,
+        .editor-table textarea:focus,
+        .editor-table select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+        
+        .editor-table textarea {
+            min-height: 60px;
+            resize: vertical;
+        }
+        
+        .editor-table .modified {
+            background-color: #fef3c7;
+            border-color: #f59e0b;
+        }
+        
+        .pagination {
+            padding: 20px 25px;
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            background: #f8fafc;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .pagination-info {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        
+        .pagination-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .pagination-controls button {
+            width: auto;
+            padding: 8px 16px;
+            font-size: 14px;
+            min-width: auto;
+        }
+        
+        .image-preview {
+            max-width: 60px;
+            max-height: 60px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-connected { background: #10b981; }
+        .status-error { background: #ef4444; }
+        .status-loading { background: #f59e0b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Webflow CMS Bulk Editor</h1>
+            <p>Transform your Webflow CMS management with seamless bulk editing capabilities</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <div class="form-group">
+                    <label for="site-select">
+                        <span id="connection-status" class="status-indicator status-loading"></span>
+                        Select Webflow Site
+                    </label>
+                    <select id="site-select" disabled>
+                        <option value="">Loading sites...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="collection-select">Select Collection</label>
+                    <select id="collection-select" disabled>
+                        <option value="">Select a site first</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button id="load-collection" disabled>Load Collection</button>
+                </div>
+            </div>
+        </div>
+        
+        <div id="messages"></div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            Loading collection data...
+        </div>
+        
+        <div class="editor-container" id="editor">
+            <div class="editor-header">
+                <div class="collection-info">
+                    <h3 id="collection-name">Collection Name</h3>
+                    <p id="collection-stats">0 items loaded</p>
+                </div>
+                <div class="editor-actions">
+                    <button class="btn-publish" id="update-publish" disabled>
+                        Update & Publish
+                    </button>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <table class="editor-table" id="items-table">
+                    <thead id="table-head">
+                        <!-- Dynamic headers will be inserted here -->
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Dynamic content will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="pagination" style="display: none;">
+                <div class="pagination-info">
+                    <span id="pagination-info">Showing 0-0 of 0 items</span>
+                </div>
+                <div class="pagination-controls">
+                    <button id="prev-page" disabled>Previous</button>
+                    <button id="next-page" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class WebflowBulkEditor {
+            constructor() {
+                this.currentSiteId = null;
+                this.currentCollectionId = null;
+                this.collectionSchema = null;
+                this.collectionItems = [];
+                this.currentPage = 0;
+                this.itemsPerPage = 100;
+                this.totalItems = 0;
+                this.modifiedItems = new Set();
+                
+                this.initializeElements();
+                this.bindEvents();
+                this.checkAPIConnection();
+            }
+            
+            initializeElements() {
+                this.elements = {
+                    siteSelect: document.getElementById('site-select'),
+                    collectionSelect: document.getElementById('collection-select'),
+                    loadButton: document.getElementById('load-collection'),
+                    editor: document.getElementById('editor'),
+                    loading: document.getElementById('loading'),
+                    messages: document.getElementById('messages'),
+                    tableHead: document.getElementById('table-head'),
+                    tableBody: document.getElementById('table-body'),
+                    collectionName: document.getElementById('collection-name'),
+                    collectionStats: document.getElementById('collection-stats'),
+                    updatePublishButton: document.getElementById('update-publish'),
+                    pagination: document.getElementById('pagination'),
+                    paginationInfo: document.getElementById('pagination-info'),
+                    prevPageButton: document.getElementById('prev-page'),
+                    nextPageButton: document.getElementById('next-page'),
+                    connectionStatus: document.getElementById('connection-status')
+                };
+            }
+            
+            bindEvents() {
+                this.elements.siteSelect.addEventListener('change', () => this.onSiteChange());
+                this.elements.collectionSelect.addEventListener('change', () => this.onCollectionChange());
+                this.elements.loadButton.addEventListener('click', () => this.loadCollection());
+                this.elements.updatePublishButton.addEventListener('click', () => this.updateAndPublish());
+                this.elements.prevPageButton.addEventListener('click', () => this.loadPreviousPage());
+                this.elements.nextPageButton.addEventListener('click', () => this.loadNextPage());
+            }
+            
+            async checkAPIConnection() {
+                try {
+                    const response = await fetch('/api/health');
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.elements.connectionStatus.className = 'status-indicator status-connected';
+                        await this.loadSites();
+                    } else {
+                        this.showError(result.error);
+                        this.elements.connectionStatus.className = 'status-indicator status-error';
+                        this.elements.siteSelect.innerHTML = '<option value="">API connection failed</option>';
+                    }
+                } catch (error) {
+                    this.showError('Failed to connect to API');
+                    this.elements.connectionStatus.className = 'status-indicator status-error';
+                }
+            }
+            
+            async loadSites() {
+                try {
+                    const response = await fetch('/api/sites');
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.populateSiteSelect(result.sites);
+                    } else {
+                        this.showError(result.error);
+                    }
+                } catch (error) {
+                    this.showError('Failed to load sites');
+                }
+            }
+            
+            populateSiteSelect(sites) {
+                this.elements.siteSelect.innerHTML = '<option value="">Select a site...</option>';
+                
+                sites.forEach(site => {
+                    const option = document.createElement('option');
+                    option.value = site.id;
+                    option.textContent = site.displayName;
+                    this.elements.siteSelect.appendChild(option);
+                });
+                
+                this.elements.siteSelect.disabled = false;
+            }
+            
+            async onSiteChange() {
+                const siteId = this.elements.siteSelect.value;
+                
+                if (!siteId) {
+                    this.resetCollectionSelect();
+                    return;
+                }
+                
+                this.currentSiteId = siteId;
+                await this.loadCollections(siteId);
+            }
+            
+            async loadCollections(siteId) {
+                this.elements.collectionSelect.disabled = true;
+                this.elements.collectionSelect.innerHTML = '<option value="">Loading collections...</option>';
+                
+                try {
+                    const response = await fetch(`/api/sites/${siteId}/collections`);
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.populateCollectionSelect(result.collections);
+                    } else {
+                        this.showError(result.error);
+                        this.resetCollectionSelect();
+                    }
+                } catch (error) {
+                    this.showError('Failed to load collections');
+                    this.resetCollectionSelect();
+                }
+            }
+            
+            populateCollectionSelect(collections) {
+                this.elements.collectionSelect.innerHTML = '<option value="">Select a collection...</option>';
+                
+                collections.forEach(collection => {
+                    const option = document.createElement('option');
+                    option.value = collection.id;
+                    option.textContent = collection.displayName;
+                    this.elements.collectionSelect.appendChild(option);
+                });
+                
+                this.elements.collectionSelect.disabled = false;
+            }
+            
+            resetCollectionSelect() {
+                this.elements.collectionSelect.innerHTML = '<option value="">Select a site first</option>';
+                this.elements.collectionSelect.disabled = true;
+                this.elements.loadButton.disabled = true;
+            }
+            
+            onCollectionChange() {
+                const collectionId = this.elements.collectionSelect.value;
+                this.currentCollectionId = collectionId;
+                this.elements.loadButton.disabled = !collectionId;
+            }
+            
+            async loadCollection() {
+                if (!this.currentCollectionId) return;
+                
+                this.showLoading(true);
+                this.hideMessages();
+                
+                try {
+                    // Load collection schema and items in parallel
+                    const [schemaResponse, itemsResponse] = await Promise.all([
+                        fetch(`/api/collections/${this.currentCollectionId}`),
+                        fetch(`/api/collections/${this.currentCollectionId}/items?limit=${this.itemsPerPage}&offset=0`)
+                    ]);
+                    
+                    const schemaResult = await schemaResponse.json();
+                    const itemsResult = await itemsResponse.json();
+                    
+                    if (schemaResult.success && itemsResult.success) {
+                        this.collectionSchema = schemaResult.collection;
+                        this.collectionItems = itemsResult.items;
+                        this.totalItems = itemsResult.pagination.total;
+                        this.currentPage = 0;
+                        
+                        this.renderEditor();
+                        this.elements.editor.style.display = 'block';
+                    } else {
+                        this.showError(schemaResult.error || itemsResult.error);
+                    }
+                } catch (error) {
+                    this.showError('Failed to load collection data');
+                }
+                
+                this.showLoading(false);
+            }
+            
+            renderEditor() {
+                this.renderTableHeaders();
+                this.renderTableBody();
+                this.updateCollectionInfo();
+                this.updatePagination();
+                this.elements.updatePublishButton.disabled = false;
+            }
+            
+            renderTableHeaders() {
+                const headerRow = document.createElement('tr');
+                
+                this.collectionSchema.fields.forEach(field => {
+                    const th = document.createElement('th');
+                    th.textContent = field.displayName;
+                    th.setAttribute('data-field-slug', field.slug);
+                    th.setAttribute('data-field-type', field.type);
+                    headerRow.appendChild(th);
+                });
+                
+                this.elements.tableHead.innerHTML = '';
+                this.elements.tableHead.appendChild(headerRow);
+            }
+            
+            renderTableBody() {
+                this.elements.tableBody.innerHTML = '';
+                
+                this.collectionItems.forEach(item => {
+                    const row = this.createItemRow(item);
+                    this.elements.tableBody.appendChild(row);
+                });
+            }
+            
+            createItemRow(item) {
+                const row = document.createElement('tr');
+                row.setAttribute('data-item-id', item.id);
+                
+                this.collectionSchema.fields.forEach(field => {
+                    const td = document.createElement('td');
+                    const input = this.createFieldInput(field, item.fieldData[field.slug], item.id);
+                    td.appendChild(input);
+                    row.appendChild(td);
+                });
+                
+                return row;
+            }
+            
+            createFieldInput(field, value, itemId) {
+                const inputId = `${itemId}-${field.slug}`;
+                let input;
+                
+                console.log(`Creating input for field:`, {
+                    fieldSlug: field.slug,
+                    fieldType: field.type,
+                    itemId,
+                    value
+                });
+                
+                switch (field.type) {
+                    case 'PlainText':
+                    case 'Link':
+                    case 'Email':
+                    case 'Phone':
+                        input = document.createElement('input');
+                        input.type = this.getInputType(field.type);
+                        input.value = value || '';
+                        break;
+                        
+                    case 'Number':
+                        input = document.createElement('input');
+                        input.type = 'number';
+                        input.value = value || '';
+                        input.step = 'any';
+                        break;
+                        
+                    case 'RichText':
+                        input = document.createElement('textarea');
+                        input.value = value || '';
+                        break;
+                        
+                    case 'Switch':
+                        input = document.createElement('input');
+                        input.type = 'checkbox';
+                        input.checked = value === true;
+                        break;
+                        
+                    case 'Option':
+                        input = document.createElement('select');
+                        const defaultOption = document.createElement('option');
+                        defaultOption.value = '';
+                        defaultOption.textContent = 'Select option...';
+                        input.appendChild(defaultOption);
+                        
+                        if (field.options) {
+                            field.options.forEach(option => {
+                                const optionElement = document.createElement('option');
+                                optionElement.value = option.name;
+                                optionElement.textContent = option.name;
+                                optionElement.selected = value === option.name;
+                                input.appendChild(optionElement);
+                            });
+                        }
+                        break;
+                        
+                    case 'DateTime':
+                        input = document.createElement('input');
+                        input.type = 'datetime-local';
+                        if (value) {
+                            // Convert ISO string to datetime-local format
+                            const date = new Date(value);
+                            input.value = date.toISOString().slice(0, 16);
+                        }
+                        break;
+                        
+                    case 'ImageRef':
+                    case 'FileRef':
+                        input = this.createFileInput(field, value, itemId);
+                        break;
+                        
+                    case 'ItemRef':
+                        input = document.createElement('input');
+                        input.type = 'text';
+                        input.placeholder = 'Referenced item ID';
+                        input.value = value || '';
+                        break;
+                        
+                    case 'ItemRefSet':
+                        input = document.createElement('input');
+                        input.type = 'text';
+                        input.placeholder = 'Comma-separated item IDs';
+                        input.value = Array.isArray(value) ? value.join(', ') : (value || '');
+                        break;
+                        
+                    default:
+                        input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = typeof value === 'object' ? JSON.stringify(value) : (value || '');
+                }
+                
+                // Set attributes for all inputs (file inputs already handle this in createFileInput)
+                if (field.type !== 'ImageRef' && field.type !== 'FileRef') {
+                    input.id = inputId;
+                    input.setAttribute('data-field-slug', field.slug);
+                    input.setAttribute('data-field-type', field.type);
+                    input.setAttribute('data-item-id', itemId);
+                    
+                    // Add change event listener to track modifications
+                    input.addEventListener('input', () => this.onFieldChange(input));
+                    input.addEventListener('change', () => this.onFieldChange(input));
+                } else {
+                    // For file inputs (containers), add event listeners to the actual input element
+                    const actualInput = input.querySelector('input');
+                    if (actualInput) {
+                        actualInput.addEventListener('input', () => this.onFieldChange(actualInput));
+                        actualInput.addEventListener('change', () => this.onFieldChange(actualInput));
+                    }
+                }
+                
+                // Validate that attributes were set correctly
+                if (!field.slug || !field.type) {
+                    console.error('Field missing slug or type:', field);
+                }
+                
+                return input;
+            }
+            
+            createFileInput(field, value, itemId) {
+                const container = document.createElement('div');
+                
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.placeholder = `${field.type === 'ImageRef' ? 'Image' : 'File'} URL`;
+                input.id = `${itemId}-${field.slug}`;
+                input.setAttribute('data-field-slug', field.slug);
+                input.setAttribute('data-field-type', field.type);
+                input.setAttribute('data-item-id', itemId);
+                
+                if (value && typeof value === 'object' && value.url) {
+                    input.value = value.url;
+                    
+                    if (field.type === 'ImageRef' && value.url) {
+                        const preview = document.createElement('img');
+                        preview.src = value.url;
+                        preview.className = 'image-preview';
+                        preview.onerror = () => preview.style.display = 'none';
+                        container.appendChild(preview);
+                    }
+                } else if (typeof value === 'string') {
+                    input.value = value;
+                }
+                
+                container.appendChild(input);
+                
+                // Set the container to handle the input properly
+                container.querySelector = function(selector) {
+                    if (selector === 'input') return input;
+                    return HTMLElement.prototype.querySelector.call(this, selector);
+                };
+                
+                // Note: Event listeners will be added by the parent function
+                
+                return container;
+            }
+            
+            getInputType(fieldType) {
+                switch (fieldType) {
+                    case 'Email': return 'email';
+                    case 'Phone': return 'tel';
+                    case 'Link': return 'url';
+                    default: return 'text';
+                }
+            }
+            
+            onFieldChange(input) {
+                const itemId = input.getAttribute('data-item-id');
+                this.modifiedItems.add(itemId);
+                input.classList.add('modified');
+                
+                // Update collection stats
+                this.updateCollectionInfo();
+            }
+            
+            updateCollectionInfo() {
+                this.elements.collectionName.textContent = this.collectionSchema.displayName;
+                
+                const startItem = this.currentPage * this.itemsPerPage + 1;
+                const endItem = Math.min((this.currentPage + 1) * this.itemsPerPage, this.totalItems);
+                const modifiedCount = this.modifiedItems.size;
+                
+                this.elements.collectionStats.textContent = 
+                    `${startItem}-${endItem} of ${this.totalItems} items` + 
+                    (modifiedCount > 0 ? ` • ${modifiedCount} modified` : '');
+            }
+            
+            updatePagination() {
+                const hasNextPage = (this.currentPage + 1) * this.itemsPerPage < this.totalItems;
+                const hasPrevPage = this.currentPage > 0;
+                
+                this.elements.prevPageButton.disabled = !hasPrevPage;
+                this.elements.nextPageButton.disabled = !hasNextPage;
+                
+                const startItem = this.currentPage * this.itemsPerPage + 1;
+                const endItem = Math.min((this.currentPage + 1) * this.itemsPerPage, this.totalItems);
+                
+                this.elements.paginationInfo.textContent = `Showing ${startItem}-${endItem} of ${this.totalItems} items`;
+                
+                this.elements.pagination.style.display = this.totalItems > this.itemsPerPage ? 'flex' : 'none';
+            }
+            
+            async loadNextPage() {
+                if ((this.currentPage + 1) * this.itemsPerPage >= this.totalItems) return;
+                
+                this.currentPage++;
+                await this.loadPageItems();
+            }
+            
+            async loadPreviousPage() {
+                if (this.currentPage <= 0) return;
+                
+                this.currentPage--;
+                await this.loadPageItems();
+            }
+            
+            async loadPageItems() {
+                this.showLoading(true);
+                
+                try {
+                    const offset = this.currentPage * this.itemsPerPage;
+                    const response = await fetch(
+                        `/api/collections/${this.currentCollectionId}/items?limit=${this.itemsPerPage}&offset=${offset}`
+                    );
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.collectionItems = result.items;
+                        this.renderTableBody();
+                        this.updateCollectionInfo();
+                        this.updatePagination();
+                    } else {
+                        this.showError(result.error);
+                    }
+                } catch (error) {
+                    this.showError('Failed to load page items');
+                }
+                
+                this.showLoading(false);
+            }
+            
+            async updateAndPublish() {
+                if (this.modifiedItems.size === 0) {
+                    this.showError('No changes to save');
+                    return;
+                }
+                
+                const confirmation = confirm(
+                    `Update ${this.modifiedItems.size} modified items and publish the site?\n\n` +
+                    'This will make your changes live on the website.'
+                );
+                
+                if (!confirmation) return;
+                
+                this.elements.updatePublishButton.disabled = true;
+                this.elements.updatePublishButton.textContent = 'Step 1/2: Updating items...';
+                
+                try {
+                    // Collect all modified items data
+                    const itemsToUpdate = this.collectModifiedItemsData();
+                    
+                    // Debug logging
+                    console.log('Starting update with:', {
+                        itemsToUpdate,
+                        modifiedItems: Array.from(this.modifiedItems),
+                        collectionId: this.currentCollectionId,
+                        siteId: this.currentSiteId
+                    });
+                    
+                    // Update CMS items
+                    const updateResponse = await fetch(`/api/collections/${this.currentCollectionId}/items`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: itemsToUpdate })
+                    });
+                    
+                    const updateResult = await updateResponse.json();
+                    
+                    if (!updateResult.success) {
+                        throw new Error(updateResult.error);
+                    }
+                    
+                    this.elements.updatePublishButton.textContent = 'Step 2/2: Publishing site...';
+                    
+                    // Publish site
+                    const publishResponse = await fetch(`/api/sites/${this.currentSiteId}/publish`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    const publishResult = await publishResponse.json();
+                    
+                    if (!publishResult.success) {
+                        throw new Error(publishResult.error);
+                    }
+                    
+                    this.showSuccess('Items updated and site published successfully!');
+                    this.modifiedItems.clear();
+                    this.clearModifiedStates();
+                    
+                } catch (error) {
+                    console.error('Update operation failed:', error);
+                    
+                    // Create a more detailed error display
+                    let errorDisplay = error.message;
+                    let errorTitle = 'Update Failed';
+                    
+                    // Provide specific guidance for different error types
+                    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                        errorDisplay = 'Network error: Unable to connect to the server. Please check your connection and try again.';
+                    } else if (error.message.includes('Unexpected token')) {
+                        errorTitle = 'Items Updated, Publish May Have Failed';
+                        errorDisplay = 'The items were updated successfully, but there was an issue with the publish step. Your changes are saved in Webflow but may not be live yet.\n\nYou can manually publish your site from the Webflow dashboard, or check the server logs for more details.';
+                    } else if (error.message.includes('Server returned HTML')) {
+                        errorTitle = 'Items Updated, Publish Failed';
+                        errorDisplay = 'The items were updated successfully, but the publish step failed. Your changes are saved in Webflow but are not live yet.\n\nPlease manually publish your site from the Webflow dashboard.';
+                    }
+                    
+                    this.showDetailedError(errorTitle, errorDisplay);
+                } finally {
+                    this.elements.updatePublishButton.disabled = false;
+                    this.elements.updatePublishButton.textContent = 'Update & Publish';
+                    this.updateCollectionInfo();
+                }
+            }
+            
+            collectModifiedItemsData() {
+                const itemsToUpdate = [];
+                
+                this.modifiedItems.forEach(itemId => {
+                    const fieldData = {};
+                    const inputs = document.querySelectorAll(`[data-item-id="${itemId}"]`);
+                    
+                    console.log(`Processing item ${itemId}, found ${inputs.length} inputs`);
+                    
+                    inputs.forEach((input, index) => {
+                        const fieldSlug = input.getAttribute('data-field-slug');
+                        const fieldType = input.getAttribute('data-field-type');
+                        
+                        // Debug each input
+                        console.log(`Input ${index}:`, {
+                            element: input.tagName,
+                            fieldSlug,
+                            fieldType,
+                            value: input.value || input.checked,
+                            id: input.id
+                        });
+                        
+                        // Skip inputs with undefined/null field slugs
+                        if (!fieldSlug || fieldSlug === 'undefined' || fieldSlug === 'null') {
+                            console.error(`Skipping input with invalid field slug:`, {
+                                element: input,
+                                fieldSlug,
+                                fieldType,
+                                attributes: Array.from(input.attributes).map(attr => `${attr.name}="${attr.value}"`)
+                            });
+                            return;
+                        }
+                        
+                        // Skip inputs with undefined/null field types
+                        if (!fieldType || fieldType === 'undefined' || fieldType === 'null') {
+                            console.error(`Skipping input with invalid field type:`, {
+                                element: input,
+                                fieldSlug,
+                                fieldType
+                            });
+                            return;
+                        }
+                        
+                        const fieldValue = this.getFieldValue(input, fieldType);
+                        fieldData[fieldSlug] = fieldValue;
+                        
+                        console.log(`Added field: ${fieldSlug} = ${JSON.stringify(fieldValue)}`);
+                    });
+                    
+                    // Only add items that have valid field data
+                    if (Object.keys(fieldData).length > 0) {
+                        itemsToUpdate.push({
+                            id: itemId,
+                            fieldData: fieldData
+                        });
+                        console.log(`Added item ${itemId} with fields:`, Object.keys(fieldData));
+                    } else {
+                        console.error(`No valid fields found for item ${itemId}`);
+                    }
+                });
+                
+                console.log('Final items to update:', itemsToUpdate);
+                return itemsToUpdate;
+            }
+            
+            getFieldValue(input, fieldType) {
+                switch (fieldType) {
+                    case 'Switch':
+                        return input.checked;
+                        
+                    case 'Number':
+                        return input.value ? parseFloat(input.value) : null;
+                        
+                    case 'DateTime':
+                        return input.value ? new Date(input.value).toISOString() : null;
+                        
+                    case 'ImageRef':
+                    case 'FileRef':
+                        const urlInput = input.querySelector('input') || input;
+                        return urlInput.value ? { url: urlInput.value } : null;
+                        
+                    case 'ItemRefSet':
+                        return input.value ? input.value.split(',').map(id => id.trim()).filter(id => id) : [];
+                        
+                    default:
+                        return input.value || null;
+                }
+            }
+            
+            clearModifiedStates() {
+                document.querySelectorAll('.modified').forEach(element => {
+                    element.classList.remove('modified');
+                });
+            }
+            
+            showLoading(show) {
+                this.elements.loading.style.display = show ? 'block' : 'none';
+            }
+            
+            showError(message) {
+                this.showMessage(message, 'error');
+            }
+            
+            showSuccess(message) {
+                this.showMessage(message, 'success');
+            }
+            
+            showMessage(message, type) {
+                this.elements.messages.innerHTML = `<div class="${type}">${message}</div>`;
+                setTimeout(() => this.hideMessages(), 5000);
+            }
+            
+            hideMessages() {
+                this.elements.messages.innerHTML = '';
+            }
+        }
+        
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            new WebflowBulkEditor();
+        });
+    </script>
+</body>
+</html>
