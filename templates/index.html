@@ -89,6 +89,56 @@
             color: #9ca3af;
         }
         
+        .select-with-refresh {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        
+        .select-with-refresh select {
+            flex: 1;
+        }
+        
+        .btn-refresh {
+            background: #6b7280;
+            color: white;
+            border: none;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: auto;
+            width: 36px;
+            height: 36px;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-refresh:hover:not(:disabled) {
+            background: #4b5563;
+            transform: rotate(90deg);
+        }
+        
+        .btn-refresh:disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-refresh svg {
+            transition: transform 0.2s ease;
+        }
+        
+        .spinning {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
         button {
             background: #3b82f6;
             color: white;
@@ -462,9 +512,16 @@
                 
                 <div class="form-group">
                     <label for="collection-select">Select Collection</label>
-                    <select id="collection-select" disabled>
-                        <option value="">Select a site first</option>
-                    </select>
+                    <div class="select-with-refresh">
+                        <select id="collection-select" disabled>
+                            <option value="">Select a site first</option>
+                        </select>
+                        <button id="refresh-collection" class="btn-refresh" disabled title="Refresh collection data">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M21 12C21 16.97 16.97 21 12 21C7.03 21 3 16.97 3 12C3 7.03 7.03 3 12 3C13.83 3 15.5 3.58 16.85 4.58L15.85 5.58C14.77 4.88 13.45 4.5 12 4.5C7.86 4.5 4.5 7.86 4.5 12C4.5 16.14 7.86 19.5 12 19.5C16.14 19.5 19.5 16.14 19.5 12H18L21 9L24 12H21Z" fill="currentColor"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -561,6 +618,7 @@
                 this.elements = {
                     siteSelect: document.getElementById('site-select'),
                     collectionSelect: document.getElementById('collection-select'),
+                    refreshCollectionButton: document.getElementById('refresh-collection'),
                     editor: document.getElementById('editor'),
                     loading: document.getElementById('loading'),
                     messages: document.getElementById('messages'),
@@ -587,6 +645,7 @@
             bindEvents() {
                 this.elements.siteSelect.addEventListener('change', () => this.onSiteChange());
                 this.elements.collectionSelect.addEventListener('change', () => this.onCollectionChange());
+                this.elements.refreshCollectionButton.addEventListener('click', () => this.refreshCollection());
                 this.elements.addItemButton.addEventListener('click', () => this.addNewItem());
                 this.elements.updatePublishButton.addEventListener('click', () => this.updateAndPublish());
                 this.elements.prevPageButton.addEventListener('click', () => this.loadPreviousPage());
@@ -603,6 +662,9 @@
                     if (result.success) {
                         this.elements.connectionStatus.className = 'status-indicator status-connected';
                         await this.loadSites();
+                        
+                        // After loading sites, restore previous selections
+                        await this.restorePreviousSelections();
                     } else {
                         this.showError(result.error);
                         this.elements.connectionStatus.className = 'status-indicator status-error';
@@ -698,11 +760,51 @@
                 this.currentCollectionId = collectionId;
                 
                 if (collectionId) {
+                    // Enable refresh button when a collection is selected
+                    this.elements.refreshCollectionButton.disabled = false;
+                    
                     // Auto-load the collection when selected
                     await this.loadCollection();
                 } else {
-                    // Hide editor if no collection selected
+                    // Hide editor and disable refresh button if no collection selected
                     this.elements.editor.style.display = 'none';
+                    this.elements.refreshCollectionButton.disabled = true;
+                }
+            }
+            
+            async refreshCollection() {
+                if (!this.currentCollectionId) {
+                    this.showError('No collection selected');
+                    return;
+                }
+                
+                // Add visual feedback
+                const originalText = this.elements.refreshCollectionButton.innerHTML;
+                this.elements.refreshCollectionButton.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="spinning">
+                        <path d="M21 12C21 16.97 16.97 21 12 21C7.03 21 3 16.97 3 12C3 7.03 7.03 3 12 3C13.83 3 15.5 3.58 16.85 4.58L15.85 5.58C14.77 4.88 13.45 4.5 12 4.5C7.86 4.5 4.5 7.86 4.5 12C4.5 16.14 7.86 19.5 12 19.5C16.14 19.5 19.5 16.14 19.5 12H18L21 9L24 12H21Z" fill="currentColor"/>
+                    </svg>
+                `;
+                this.elements.refreshCollectionButton.disabled = true;
+                
+                try {
+                    // Reset to first page and clear modifications
+                    this.currentPage = 0;
+                    this.modifiedItems.clear();
+                    this.pendingFiles.clear();
+                    
+                    // Reload collection using the existing loadCollection method
+                    await this.loadCollection();
+                    
+                    this.showSuccess('Collection refreshed successfully');
+                    
+                } catch (error) {
+                    console.error('Collection refresh failed:', error);
+                    this.showError(`Failed to refresh collection: ${error.message}`);
+                } finally {
+                    // Restore button
+                    this.elements.refreshCollectionButton.innerHTML = originalText;
+                    this.elements.refreshCollectionButton.disabled = false;
                 }
             }
             
