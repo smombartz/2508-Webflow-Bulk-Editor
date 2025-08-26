@@ -139,6 +139,155 @@
             to { transform: rotate(360deg); }
         }
         
+        /* Multi-select component styles */
+        .multi-select-container {
+            position: relative;
+            width: 100%;
+        }
+        
+        .multi-select-display {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 8px 32px 8px 12px;
+            min-height: 36px;
+            min-width: 200px;
+            cursor: pointer;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            align-items: center;
+            transition: border-color 0.2s ease;
+        }
+        
+        .multi-select-display:hover {
+            border-color: #9ca3af;
+        }
+        
+        .multi-select-display.focused {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .multi-select-placeholder {
+            color: #9ca3af;
+            font-style: italic;
+        }
+        
+        .multi-select-tag {
+            background: #3b82f6;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 16px;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .multi-select-tag-remove {
+            cursor: pointer;
+            font-weight: bold;
+            opacity: 0.7;
+        }
+        
+        .multi-select-tag-remove:hover {
+            opacity: 1;
+        }
+        
+        .multi-select-arrow {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            transition: transform 0.2s ease;
+        }
+        
+        .multi-select-container.open .multi-select-arrow {
+            transform: translateY(-50%) rotate(180deg);
+        }
+        
+        .multi-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 200px;
+            min-width: 300px;
+            width: max-content;
+            max-width: 500px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        .multi-select-container.open .multi-select-dropdown {
+            display: block;
+        }
+        
+        .multi-select-search {
+            width: 100%;
+            min-width: 280px;
+            border: none;
+            padding: 8px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            outline: none;
+            font-size: 14px;
+        }
+        
+        .multi-select-options {
+            width: 100%;
+        }
+        
+        .multi-select-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            transition: background-color 0.2s ease;
+            text-align: left;
+        }
+        
+        .multi-select-option:hover {
+            background: #f3f4f6;
+        }
+        
+        .multi-select-option.selected {
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+        
+        .multi-select-checkbox {
+            width: 16px;
+            height: 16px;
+            margin: 0 8px 0 0;
+            flex-shrink: 0;
+            vertical-align: middle;
+        }
+        
+        .multi-select-option-text {
+            flex: 1;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .multi-select-empty {
+            padding: 12px;
+            text-align: center;
+            color: #9ca3af;
+            font-style: italic;
+        }
+        
         button {
             background: #3b82f6;
             color: white;
@@ -418,12 +567,10 @@
         .editor-table input,
         .editor-table textarea,
         .editor-table select {
-            width: 100%;
             padding: 8px 10px;
             border: 1px solid #d1d5db;
             border-radius: 4px;
             font-size: 14px;
-            min-width: 150px;
         }
         
         .editor-table input:focus,
@@ -608,6 +755,9 @@
                 this.modifiedItems = new Set();
                 this.newItemCounter = 0;
                 this.pendingFiles = new Map(); // Store files for later upload
+                
+                // Global reference data cache for fast lookups
+                this.referenceCache = new Map(); // collectionId -> {options: [], lookupMap: {}, loading: boolean, promise: Promise}
                 
                 this.initializeElements();
                 this.bindEvents();
@@ -927,7 +1077,9 @@
                     fieldSlug: field.slug,
                     fieldType: field.type,
                     itemId,
-                    value
+                    value,
+                    validCollections: field.validCollections,
+                    fieldObject: field
                 });
                 
                 switch (field.type) {
@@ -999,10 +1151,9 @@
                         break;
                         
                     case 'ItemRefSet':
-                        input = document.createElement('input');
-                        input.type = 'text';
-                        input.placeholder = 'Comma-separated item IDs';
-                        input.value = Array.isArray(value) ? value.join(', ') : (value || '');
+                    case 'MultiReference':
+                        console.log(`Creating multi-reference input for field ${field.slug} with validCollections:`, field.validCollections);
+                        input = this.createMultiReferenceInput(field, value, itemId);
                         break;
                         
                     default:
@@ -1011,8 +1162,8 @@
                         input.value = typeof value === 'object' ? JSON.stringify(value) : (value || '');
                 }
                 
-                // Set attributes for all inputs (file inputs already handle this in createFileInput)
-                if (field.type !== 'ImageRef' && field.type !== 'FileRef') {
+                // Set attributes for all inputs (file inputs and multi-reference already handle this)
+                if (field.type !== 'ImageRef' && field.type !== 'FileRef' && field.type !== 'ItemRefSet' && field.type !== 'MultiReference') {
                     input.id = inputId;
                     input.setAttribute('data-field-slug', field.slug);
                     input.setAttribute('data-field-type', field.type);
@@ -1021,6 +1172,10 @@
                     // Add change event listener to track modifications
                     input.addEventListener('input', () => this.onFieldChange(input));
                     input.addEventListener('change', () => this.onFieldChange(input));
+                } else if (field.type === 'ItemRefSet' || field.type === 'MultiReference') {
+                    // Multi-reference component already has attributes and event handlers set
+                    // Just add the ID
+                    input.id = inputId;
                 } else {
                     // For file inputs (containers), add event listeners to the actual input element
                     const actualInput = input.querySelector('input');
@@ -1091,6 +1246,326 @@
                 };
                 
                 return container;
+            }
+            
+            createMultiReferenceInput(field, value, itemId) {
+                const container = document.createElement('div');
+                container.className = 'multi-select-container';
+                container.setAttribute('data-field-slug', field.slug);
+                container.setAttribute('data-field-type', field.type);
+                container.setAttribute('data-item-id', itemId);
+                
+                // Create display area
+                const display = document.createElement('div');
+                display.className = 'multi-select-display';
+                
+                // Create arrow icon
+                const arrow = document.createElement('div');
+                arrow.className = 'multi-select-arrow';
+                arrow.innerHTML = '▼';
+                
+                // Create dropdown
+                const dropdown = document.createElement('div');
+                dropdown.className = 'multi-select-dropdown';
+                
+                // Create search input
+                const searchInput = document.createElement('input');
+                searchInput.className = 'multi-select-search';
+                searchInput.placeholder = 'Search...';
+                searchInput.type = 'text';
+                
+                // Create options container
+                const optionsContainer = document.createElement('div');
+                optionsContainer.className = 'multi-select-options';
+                
+                dropdown.appendChild(searchInput);
+                dropdown.appendChild(optionsContainer);
+                
+                container.appendChild(display);
+                container.appendChild(arrow);
+                container.appendChild(dropdown);
+                
+                // Initialize component state
+                container._selectedIds = Array.isArray(value) ? [...value] : [];
+                container._options = [];
+                container._filteredOptions = [];
+                
+                // Event handlers
+                display.addEventListener('click', () => this.toggleMultiSelect(container));
+                searchInput.addEventListener('input', (e) => this.filterMultiSelectOptions(container, e.target.value));
+                
+                // Close dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!container.contains(e.target)) {
+                        container.classList.remove('open');
+                        display.classList.remove('focused');
+                    }
+                });
+                
+                // Load reference data - try different ways to find the collection ID
+                let collectionId = null;
+                
+                // Try validCollections first (API v1 style)
+                if (field.validCollections && field.validCollections.length > 0) {
+                    collectionId = field.validCollections[0];
+                }
+                // Try validations.collectionId (API v2 style)
+                else if (field.validations && field.validations.collectionId) {
+                    collectionId = field.validations.collectionId;
+                }
+                // Try other possible properties
+                else if (field.collectionId) {
+                    collectionId = field.collectionId;
+                }
+                else if (field.referencedCollectionId) {
+                    collectionId = field.referencedCollectionId;
+                }
+                
+                console.log(`Found collection ID for ${field.slug}: ${collectionId}`);
+                
+                if (collectionId) {
+                    this.loadReferenceOptions(container, collectionId);
+                } else {
+                    console.warn('Could not find referenced collection ID for field:', field.slug);
+                }
+                
+                // Initial render (will show IDs until options load)
+                this.renderMultiSelectDisplay(container);
+                
+                // Add custom methods to container for form handling
+                container.getValue = () => container._selectedIds;
+                container.setValue = (newValue) => {
+                    container._selectedIds = Array.isArray(newValue) ? [...newValue] : [];
+                    this.renderMultiSelectDisplay(container);
+                };
+                
+                return container;
+            }
+            
+            async loadReferenceOptions(container, collectionId) {
+                // Check if we already have this data cached
+                if (this.referenceCache.has(collectionId)) {
+                    const cacheEntry = this.referenceCache.get(collectionId);
+                    
+                    if (cacheEntry.loading) {
+                        // Wait for existing request to complete
+                        console.log(`Waiting for existing request for collection: ${collectionId}`);
+                        await cacheEntry.promise;
+                    }
+                    
+                    // Use cached data
+                    container._options = cacheEntry.options;
+                    console.log(`Using cached reference options for collection: ${collectionId} (${container._options.length} items)`);
+                    
+                    // Re-render display now that we have the option names
+                    this.renderMultiSelectDisplay(container);
+                    this.filterMultiSelectOptions(container, '');
+                    return;
+                }
+                
+                // Create cache entry and start loading
+                const loadingPromise = this.fetchReferenceData(collectionId);
+                this.referenceCache.set(collectionId, {
+                    options: [],
+                    lookupMap: {},
+                    loading: true,
+                    promise: loadingPromise
+                });
+                
+                try {
+                    const options = await loadingPromise;
+                    const cacheEntry = this.referenceCache.get(collectionId);
+                    
+                    // Create lookup map for super fast ID->name lookups
+                    const lookupMap = {};
+                    options.forEach(option => {
+                        lookupMap[option.id] = option.name;
+                    });
+                    
+                    // Update cache
+                    cacheEntry.options = options;
+                    cacheEntry.lookupMap = lookupMap;
+                    cacheEntry.loading = false;
+                    
+                    // Update this container
+                    container._options = options;
+                    
+                    console.log(`Loaded and cached ${options.length} reference options for collection: ${collectionId}`);
+                    
+                    // Re-render display now that we have the option names
+                    this.renderMultiSelectDisplay(container);
+                    this.filterMultiSelectOptions(container, '');
+                    
+                } catch (error) {
+                    console.error('Error loading reference options:', error);
+                    const cacheEntry = this.referenceCache.get(collectionId);
+                    if (cacheEntry) {
+                        cacheEntry.loading = false;
+                    }
+                }
+            }
+            
+            async fetchReferenceData(collectionId) {
+                console.log(`Fetching reference data for collection: ${collectionId}`);
+                const response = await fetch(`/api/collections/${collectionId}/all-items`);
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error);
+                }
+                
+                return result.items.map(item => ({
+                    id: item.id,
+                    name: item.fieldData.name || item.fieldData.title || item.fieldData.slug || item.id,
+                    item: item
+                }));
+            }
+            
+            toggleMultiSelect(container) {
+                const isOpen = container.classList.contains('open');
+                if (isOpen) {
+                    container.classList.remove('open');
+                    container.querySelector('.multi-select-display').classList.remove('focused');
+                } else {
+                    container.classList.add('open');
+                    container.querySelector('.multi-select-display').classList.add('focused');
+                    // Focus search input when opened
+                    setTimeout(() => {
+                        const searchInput = container.querySelector('.multi-select-search');
+                        searchInput.focus();
+                    }, 0);
+                }
+            }
+            
+            filterMultiSelectOptions(container, searchTerm) {
+                container._filteredOptions = container._options.filter(option =>
+                    option.name.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+                this.renderMultiSelectOptions(container);
+            }
+            
+            renderMultiSelectDisplay(container) {
+                const display = container.querySelector('.multi-select-display');
+                display.innerHTML = '';
+                
+                if (container._selectedIds.length === 0) {
+                    const placeholder = document.createElement('span');
+                    placeholder.className = 'multi-select-placeholder';
+                    placeholder.textContent = 'Select tags...';
+                    display.appendChild(placeholder);
+                } else {
+                    container._selectedIds.forEach(id => {
+                        const option = container._options.find(opt => opt.id === id);
+                        const tag = document.createElement('span');
+                        tag.className = 'multi-select-tag';
+                        
+                        // Show name if option is loaded, otherwise show ID (temporarily)
+                        const displayName = option ? option.name : (id.substring(0, 8) + '...');
+                        const isLoading = !option;
+                        
+                        tag.innerHTML = `
+                            ${displayName}${isLoading ? ' (loading...)' : ''}
+                            <span class="multi-select-tag-remove" data-id="${id}">×</span>
+                        `;
+                        
+                        // Style loading tags differently
+                        if (isLoading) {
+                            tag.style.backgroundColor = '#9ca3af';
+                            tag.style.fontStyle = 'italic';
+                        }
+                        
+                        // Add remove handler
+                        const removeBtn = tag.querySelector('.multi-select-tag-remove');
+                        removeBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.removeMultiSelectOption(container, id);
+                        });
+                        
+                        display.appendChild(tag);
+                    });
+                }
+            }
+            
+            // Helper method to quickly get names for IDs using the cache
+            getNameForId(collectionId, itemId) {
+                const cacheEntry = this.referenceCache.get(collectionId);
+                if (cacheEntry && cacheEntry.lookupMap) {
+                    return cacheEntry.lookupMap[itemId] || itemId;
+                }
+                return itemId;
+            }
+            
+            renderMultiSelectOptions(container) {
+                const optionsContainer = container.querySelector('.multi-select-options');
+                optionsContainer.innerHTML = '';
+                
+                if (container._filteredOptions.length === 0) {
+                    const emptyDiv = document.createElement('div');
+                    emptyDiv.className = 'multi-select-empty';
+                    emptyDiv.textContent = 'No options found';
+                    optionsContainer.appendChild(emptyDiv);
+                    return;
+                }
+                
+                container._filteredOptions.forEach(option => {
+                    const optionDiv = document.createElement('div');
+                    optionDiv.className = 'multi-select-option';
+                    
+                    const isSelected = container._selectedIds.includes(option.id);
+                    if (isSelected) {
+                        optionDiv.classList.add('selected');
+                    }
+                    
+                    // Create checkbox element
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'multi-select-checkbox';
+                    checkbox.checked = isSelected;
+                    
+                    // Create label element
+                    const label = document.createElement('span');
+                    label.className = 'multi-select-option-text';
+                    label.textContent = option.name;
+                    
+                    // Append both to option div
+                    optionDiv.appendChild(checkbox);
+                    optionDiv.appendChild(label);
+                    
+                    // Add click handler
+                    optionDiv.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.toggleMultiSelectOption(container, option.id);
+                    });
+                    
+                    optionsContainer.appendChild(optionDiv);
+                });
+            }
+            
+            toggleMultiSelectOption(container, optionId) {
+                const index = container._selectedIds.indexOf(optionId);
+                if (index > -1) {
+                    container._selectedIds.splice(index, 1);
+                } else {
+                    container._selectedIds.push(optionId);
+                }
+                
+                this.renderMultiSelectDisplay(container);
+                this.renderMultiSelectOptions(container);
+                
+                // Trigger change event for form handling
+                this.onFieldChange(container);
+            }
+            
+            removeMultiSelectOption(container, optionId) {
+                const index = container._selectedIds.indexOf(optionId);
+                if (index > -1) {
+                    container._selectedIds.splice(index, 1);
+                    this.renderMultiSelectDisplay(container);
+                    this.renderMultiSelectOptions(container);
+                    
+                    // Trigger change event for form handling
+                    this.onFieldChange(container);
+                }
             }
             
             getInputType(fieldType) {
@@ -1850,6 +2325,12 @@
                         return input.value.trim() || null;
                         
                     case 'ItemRefSet':
+                    case 'MultiReference':
+                        // Check if it's our multi-select component
+                        if (input.classList && input.classList.contains('multi-select-container')) {
+                            return input._selectedIds || [];
+                        }
+                        // Fallback for text input
                         if (!input.value || !input.value.trim()) {
                             return [];
                         }

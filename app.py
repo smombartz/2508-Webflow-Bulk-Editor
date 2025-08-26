@@ -812,6 +812,48 @@ def publish_site(site_id):
             'error': f'Server error during publish: {str(e)}'
         }), 500
 
+@app.route('/api/collections/<collection_id>/all-items')
+def get_all_collection_items(collection_id):
+    """API endpoint to fetch ALL items from a collection (for reference fields)"""
+    try:
+        all_items = []
+        limit = 100
+        offset = 0
+        
+        while True:
+            result = webflow_api.get_collection_items(collection_id, limit, offset)
+            if not result['success']:
+                return jsonify({'success': False, 'error': result['error']}), 400
+            
+            items = result['data'].get('items', [])
+            all_items.extend(items)
+            
+            # Check if we've fetched all items
+            pagination = result['data'].get('pagination', {})
+            total = pagination.get('total', 0)
+            
+            if len(all_items) >= total:
+                break
+                
+            offset += limit
+            
+            # Safety check to prevent infinite loops
+            if offset > 10000:  # Max 10k items
+                logger.warning(f"Stopped fetching items for collection {collection_id} at 10k limit")
+                break
+        
+        logger.info(f"Fetched {len(all_items)} total items for collection {collection_id}")
+        
+        return jsonify({
+            'success': True, 
+            'items': all_items,
+            'total': len(all_items)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching all items for collection {collection_id}: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/health')
 def health_check():
     """Health check endpoint to verify API token"""
